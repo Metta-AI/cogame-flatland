@@ -67,6 +67,9 @@ type
     commands: seq[string]
     seekTick: int
     running: bool
+    tokens: seq[string]  ## runner-injected per-seat join tokens, copied out of
+                         ## the config BEFORE the listener opens and never
+                         ## mutated again
 
 var appState: AppState
 var wireConstantsJs: string
@@ -98,6 +101,42 @@ proc respondText(request: Request, code: int, body: string,
 proc isUpgrade(request: Request): bool =
   request.headers["Sec-WebSocket-Key"].len > 0
 
+proc respondForbidden(request: Request, reason: string) =
+  ## 403 on the upgrade request itself, before any socket exists.
+  ## `Connection: close` so the websocket client sees the status rather than
+  ## a half-open handshake.
+  var headers: HttpHeaders
+  headers["Content-Type"] = "text/plain; charset=utf-8"
+  headers["Cache-Control"] = "no-cache"
+  headers["Connection"] = "close"
+  request.respond(403, headers, reason & "\n")
+
+proc playerJoinAllowed(slot: int, token: string): bool {.gcsafe.} =
+  ## Configured-roster auth for `/player`. `game_config.tokens` is
+  ## runner-injected, one per seat. Certification opens
+  ## `/player?slot=0&token=bad` and REQUIRES a 401/403 or a closed handshake
+  ## (coworld 0.1.43 `runner.py:_require_bad_player_rejected`); accepting it is
+  ## a `game_contract_violation`. With no tokens configured — the local docker
+  ## smoke and the unit tests — every join is allowed.
+  var configured: seq[string]
+  {.gcsafe.}:
+    withLock appState.lock:
+      configured = appState.tokens
+  var anyConfigured = false
+  for entry in configured:
+    if entry.len > 0:
+      anyConfigured = true
+      break
+  if not anyConfigured:
+    return true
+  if slot >= 0:
+    return slot < configured.len and configured[slot].len > 0 and
+      configured[slot] == token
+  for entry in configured:
+    if entry.len > 0 and entry == token:
+      return true
+  false
+
 proc httpHandler(request: Request) {.gcsafe.} =
   ## The certifier probes these four routes BEFORE any player pod starts, so
   ## they are registered ahead of the catch-all and none of them opens a
@@ -108,6 +147,11 @@ proc httpHandler(request: Request) {.gcsafe.} =
     if request.path == "/player":
       role = rolePlayer
       slot = request.queryInt("slot", -1)
+      if not playerJoinAllowed(slot,
+          request.queryParams.getOrDefault("token", "")):
+        request.respondForbidden(
+          "player token does not match the configured seat")
+        return
     let websocket = request.upgradeToWebSocket()
     {.gcsafe.}:
       withLock appState.lock:
@@ -477,6 +521,11 @@ proc main*() =
     config.validate()
 
   let game = newSimServer(config)
+  # The join tokens have to reach the HTTP handler, which only sees globals,
+  # and they must be in place BEFORE the listener opens — the certifier's
+  # bad-token probe is the first thing that hits /player.
+  withLock appState.lock:
+    appState.tokens = config.tokens
   echo "flatland: network=", game.network, " seed=", config.seed,
     " trains=", game.trains.len, " seats=", game.seatCount(),
     " maxTicks=", config.maxTicks, " turnTicks=", config.turnTicks
