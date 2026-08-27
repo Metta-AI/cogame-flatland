@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>flatland renderer fixture</title>
+<style>
+  html, body { margin: 0; background: #120d09; color: #f2e8d8;
+               font-family: system-ui, sans-serif; }
+  #frames { display: block; }
+  iframe { display: block; border: 0; background: #120d09; }
+  #probe { display: block; }
+  #report { font-size: 12px; padding: 6px 10px; white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<!--
+  WORST-CASE RENDERER FIXTURE.
+
+  `tools/ci/docker_smoke.sh` runs with NO ANTHROPIC_API_KEY, so every seat in
+  the CI replay plays a scripted baseline and a scripted dispatcher emits no
+  `say` at all: the smoke replay CANNOT exercise the feed's radio path, the
+  populated leaderboard rail, the deadlock alarm or a fallback marker (the
+  cogchemists 2026-08-24 scar). Nothing that plays that replay can draw that
+  chrome.
+
+  This fixture drives the SHIPPED page. It fetches
+  `dist/static-replay-viewer/index.html`, swaps ONLY the wasm entry for a shim
+  that feeds synthetic chrome frames, and writes the result into an iframe at
+  several widths INCLUDING 360 px - so the real CSS, the real
+  `chrome_common.js`, the real `broadcast_core.js` and the real appended
+  FLATLAND block do the drawing. It does NOT re-implement the renderer (the
+  particle-worlds 2026-08-26 scar).
+
+  The frames it feeds are the worst case: a full-cap 120-rune `say` on ALL
+  FOUR seats, a fully populated on-time leaderboard, an ACTIVE deadlock alarm
+  with a four-train cycle, two malfunctioning trains and a fallback.
+
+  Then it transcribes every text run the page laid out onto its own canvas at
+  the measured geometry, so `viewer_smoke.mjs --strict-text-bounds` has real
+  draws to gate on: a run that does not fit its box is drawn outside the
+  canvas and the smoke fails.
+-->
+<div id="frames"></div>
+<canvas id="probe" width="1280" height="240"></canvas>
+<div id="report">starting…</div>
+<script>
+(function () {
+  'use strict';
+
+  var WIDTHS = [360, 640, 1024];
+  var CAP_SAY = 120;
+  var report = document.getElementById('report');
+
+  function say(seat) {
+    // Exactly MaxSayRunes runes, so the feed row is at its cap.
+    var base = seat + ' claims the down main to J5, hold westbounds at J4 and side ' +
+      'T21 into S3 before the meet — ';
+    var out = '';
+    while (Array.from(out).length < CAP_SAY) out += base;
+    return Array.from(out).slice(0, CAP_SAY).join('');
+  }
+
+  function frame(tick) {
+    var seats = ['Alpha', 'Beta', 'Gamma', 'Delta'];
+    var teams = {};
+    var roster = [];
+    var colours = ['red', 'blue', 'green', 'yellow'];
+    for (var i = 0; i < 4; i++) {
+      teams[colours[i]] = {
+        lives: 6 - i, prog: 6 - i, onTime: 6 - i, arrived: 6, late: 40 + 13 * i,
+        fleet: 6, alias: seats[i],
+        policies: [['flatland-signalman', 'flatland-pathfinder',
+                    'Baseline (1)', 'Baseline (2)'][i]],
+        fallbacks: i === 3 ? 2 : 0, trains: []
+      };
+      roster.push({
+        s: i, name: ['daveey', 'daveey-1', 'Baseline (1)', 'Baseline (2)'][i],
+        alias: seats[i], pol: 'flatland-signalman', kind: i < 2 ? 'llm' : 'scripted',
+        team: colours[i], alive: true, fb: i === 3 ? 2 : 0
+      });
+    }
+    var events = [];
+    for (var s = 0; s < 4; s++) {
+      events.push({ k: 'say', slot: s, text: say(seats[s]) });
+      events.push({ k: 'order', slot: s, train: 'T0' + (s + 1), verb: 'siding', arg: 'S3' });
+    }
+    events.push({ k: 'malfunction', train: 'T14', cell: [19, 9], duration: 21 });
+    events.push({ k: 'malfunction', train: 'T07', cell: [9, 4], duration: 12 });
+    events.push({ k: 'arrive', train: 'T02', slot: 0, station: 'F', tick: tick,
+                  onTime: true, lateness: 0, total: 9 });
+    events.push({ k: 'deadlock', trains: ['T09', 'T21', 'T13', 'T18'],
+                  cells: [[9, 6], [15, 6], [21, 6], [15, 2]], tick: tick });
+    events.push({ k: 'fallback', slot: 3, cause: 'timeout' });
+    return {
+      t: tick, mt: 496, ph: 'playing', lob: 0, pl: true, sp: 1, mx: 496, st: 0,
+      lp: false, sk: false, ff: false, en: true, mm: -1, bs: 1, pov: -1,
+      teams: teams, roster: roster, events: events,
+      turnTicks: 16, turn: 1 + Math.floor(tick / 16), turns: 31,
+      network: 'main_a', cellPx: 20, arrived: 9, onTime: 8, par: 15, fleet: 24,
+      malfunctions: 17, broken: 2, deadlockTicks: 31, jams: 4, deadlocks: 1,
+      trains: [], jam: ['T04', 'T11'],
+      deadlock: ['T09', 'T21', 'T13', 'T18'],
+      deadlockCells: [[9, 6], [15, 6], [21, 6], [15, 2]],
+      deadlockSince: Math.max(0, tick - 31),
+      beats: [
+        { t: 40, k: 'arrival', slot: 0, label: 'T02 arrives F on time' },
+        { t: 96, k: 'malfunction', slot: -1, label: 'T14 breaks down for 21 ticks' },
+        { t: 160, k: 'deadlock', slot: -1, label: 'deadlock: T09 vs T21' },
+        { t: 208, k: 'fallback', slot: 3, label: 'Delta missed the call (timeout)' },
+        { t: 480, k: 'end', slot: -1, label: '8 of 24 on time' }
+      ],
+      lulls: [[240, 300]],
+      lead: { teams: ['arrived', 'onTime'], pts: [[0, 0, 0], [40, 1, 1], [200, 6, 5], [480, 9, 8]] }
+    };
+  }
+
+  // The shim: the page's own static_replay.js expects window.FlatlandStaticReplay
+  // to exist and to own the canvas. We provide exactly that surface and feed
+  // chrome frames straight to onText, which is the same channel the wasm
+  // Worker uses (the reserved 1x1 sprite's label).
+  var SHIM = [
+    '<script>',
+    '(function(){',
+    '  var TICKS = [16, 120, 240, 400];',
+    '  window.FlatlandStaticReplay = {',
+    '    createCore: function (config) {',
+    '      var i = 0;',
+    '      return {',
+    '        start: function () {',
+    '          config.onStatus && config.onStatus("open");',
+    '          config.onFirstFrame && config.onFirstFrame();',
+    '          var pump = function () {',
+    '            config.onText(JSON.stringify(window.__FL_FRAME(TICKS[i % TICKS.length])));',
+    '            i += 1;',
+    '            document.documentElement.setAttribute("data-replay-loaded", "true");',
+    '            if (i < 12) setTimeout(pump, 120);',
+    '          };',
+    '          pump();',
+    '        },',
+    '        stop: function () {},',
+    '        sendCommand: function () {},',
+    '        clickMap: function () {},',
+    '        zoomAt: function () {}, setZoom: function () {}, panBy: function () {},',
+    '        panByMap: function () {}, panTo: function () {}, resetView: function () {},',
+    '        attachMinimap: function () {},',
+    '        getTransform: function () {',
+    '          return { scale: 1, offsetX: 0, offsetY: 0, nativeW: 560, nativeH: 280,',
+    '                   zoom: 1, minZoom: 1, maxZoom: 12, fitScale: 1, focusX: 280,',
+    '                   focusY: 140, visW: 560, visH: 280 };',
+    '        },',
+    '        setViewportFit: function () {},',
+    '        getPaceStats: function () { return { draws: 1 }; }',
+    '      };',
+    '    }',
+    '  };',
+    '})();',
+    '<\/script>'
+  ].join('\n');
+
+  function drive(html, width) {
+    return new Promise(function (done) {
+      var frameEl = document.createElement('iframe');
+      frameEl.width = width;
+      frameEl.height = Math.round(width * 0.62);
+      document.getElementById('frames').appendChild(frameEl);
+      var doc = frameEl.contentDocument;
+      frameEl.contentWindow.__FL_FRAME = frame;
+      doc.open();
+      doc.write(html.replace('<script src="./static_replay.js"><\/script>', SHIM));
+      doc.close();
+      setTimeout(function () { done(frameEl); }, 2200);
+    });
+  }
+
+  // Transcribe the page's laid-out text runs onto OUR canvas at the measured
+  // geometry. A run that overflows its own box lands outside the canvas, which
+  // is precisely what --strict-text-bounds gates on.
+  function transcribe(frameEl, ctx) {
+    var doc = frameEl.contentDocument;
+    var runs = 0;
+    var overflow = 0;
+    var nodes = doc.querySelectorAll(
+      '#ontime-rail .rail-row span, #killfeed .feed-row, #scorebug .plate-name, ' +
+      '#alarm-chip span, #clock-time, #clock-caption, .banner-chip');
+    for (var i = 0; i < nodes.length; i++) {
+      var node = nodes[i];
+      var text = (node.innerText || node.textContent || '').trim();
+      if (!text) continue;
+      var box = node.getBoundingClientRect();
+      var style = frameEl.contentWindow.getComputedStyle(node);
+      var size = Math.max(8, parseFloat(style.fontSize) || 12);
+      ctx.font = size + 'px ' + (style.fontFamily || 'sans-serif');
+      ctx.fillStyle = '#f2e8d8';
+      var width = ctx.measureText(text).width;
+      // A run inside an ellipsising box is ALLOWED to be shortened - that is
+      // what `.plate-name { text-overflow: ellipsis }` is for. It is a defect
+      // only when the box has collapsed to nothing (the bullwhip "…" scar).
+      // Everywhere else, any overflow at all is a defect.
+      var ellipsis = style.textOverflow === 'ellipsis';
+      var clipped = ellipsis
+        ? box.width < 16
+        : node.scrollWidth > Math.ceil(box.width) + 1;
+      // A clipped run is drawn at its FULL width from the box's left edge, so
+      // the part that has nowhere to go crosses the canvas edge.
+      var x = clipped ? ctx.canvas.width - Math.max(1, Math.round(width / 3)) : 8;
+      var y = 16 + (runs % 12) * 18;
+      ctx.fillText(text, x, y);
+      runs += 1;
+      if (clipped) overflow += 1;
+    }
+    return { runs: runs, overflow: overflow };
+  }
+
+  fetch('./index.html').then(function (res) { return res.text(); }).then(function (html) {
+    var ctx = document.getElementById('probe').getContext('2d');
+    var totals = { runs: 0, overflow: 0, widths: [] };
+    var chain = Promise.resolve();
+    WIDTHS.forEach(function (width) {
+      chain = chain.then(function () {
+        return drive(html, width).then(function (frameEl) {
+          var got = transcribe(frameEl, ctx);
+          totals.runs += got.runs;
+          totals.overflow += got.overflow;
+          totals.widths.push(width + ':' + got.runs + ' runs, ' + got.overflow + ' clipped');
+          return null;
+        });
+      });
+    });
+    return chain.then(function () {
+      report.textContent = 'renderer fixture: ' + totals.runs +
+        ' text runs transcribed, ' + totals.overflow + ' clipped\n' +
+        totals.widths.join('\n');
+      if (totals.runs === 0) {
+        document.documentElement.setAttribute(
+          'data-replay-error', 'the shipped page laid out no text at any width');
+        return;
+      }
+      document.documentElement.setAttribute('data-replay-loaded', 'true');
+    });
+  }).catch(function (error) {
+    document.documentElement.setAttribute(
+      'data-replay-error', String(error && error.message || error));
+    report.textContent = 'renderer fixture failed: ' + error;
+  });
+})();
+</script>
+</body>
+</html>

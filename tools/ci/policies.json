@@ -1,0 +1,35 @@
+[
+  {
+    "name": "flatland-signalman",
+    "run": "/bin/flatland-player",
+    "env": {
+      "PLAYER_PROMPT": "Run a speed-priority railway and say so out loud. The rule you enforce is: the FASTER\ntrain keeps the main, the SLOWER train sides. On turn 1 read your six trains' speeds and\nbroadcast which of yours are freights (ticks_per_cell 3 or 4) - \"T14 and T17 are freight,\nthey will side for anything faster\".\nEvery turn, for each of your trains, look at block_occupancy along its route_next. If a\ntrain with a SMALLER ticks_per_cell is heading the other way into the same section, issue\n\"siding\" at the nearest siding in your route_next and say which section you are clearing.\nIf YOUR train is the faster one, issue \"run\" and say \"T13 has <section>, express\".\nNever let two of your own trains enter the same single-track section from opposite ends:\nhold the later-numbered one.\nDepartures are a lever. If a train is still waiting and the first two nodes of its\nroute_next already hold two or more trains, keep it on \"hold\" and say you are holding it;\na train that has not departed costs nothing and blocks nobody.\nWhen one of your trains is malfunctioning, immediately re-route every OTHER train of\nyours that lists the broken train's cell in its route_next, using \"route\" via a different\njunction, and say on the radio where the blockage is - the other dispatchers cannot see\nyour plan, only your words.\nIf the deadlock list ever names one of your trains, stop trying to move it, say\n\"T<nn> deadlocked at <cell>, route around it\", and spend the rest of the episode getting\nyour other five through.",
+      "PLAYER_POLICY_LABEL": "signalman"
+    }
+  },
+  {
+    "name": "flatland-pathfinder",
+    "run": "/bin/flatland-player",
+    "env": {
+      "PLAYER_PROMPT": "Run a directional railway. Decide once, on turn 1, and never drift: for every single-track\nsection in the junction graph, the direction with the LOWER junction number is the \"up\"\ndirection. Your trains only ever traverse a single-track section in the up direction; if a\ntrain's fast route needs it the other way, use \"route\" via a junction that keeps it on\ndouble track, even if that is longer. Broadcast the convention on turn 1 in one line -\n\"single track is up-only for me: J2->J5, J6->J8\" - and repeat it whenever the radio shows\nsomebody running against it.\nOrder your six trains by scheduled_arrival, soonest first. The soonest-due train gets\n\"run\" and the radio claim. Every train due later than a train it would meet head-on gets\n\"siding\" at the nearest siding ahead of the meeting point, issued at least two turns\nbefore next_decision.eta_ticks reaches zero - a siding order given after a train has\nentered the section does nothing.\nStagger your own departures: never let two of your waiting trains be released in the same\nturn. Hold the one with the later scheduled_arrival.\nIf ticks_late for one of your trains passes 40, stop protecting it - it will not be on\ntime and its only remaining value is 10 points for arriving, so it becomes the train that\nsides for everyone else. Say so.\nIf the jam list names two of your trains, side the higher-numbered one and hold the other;\nif it names one of yours and one of somebody else's, side yours and say \"siding T<nn>,\nyou have the section\".",
+      "PLAYER_POLICY_LABEL": "pathfinder"
+    },
+    "player": "ply_bac48eb1-662e-44f8-973d-f3e016dccf5d"
+  },
+  {
+    "name": "flatland-timetable",
+    "run": "/bin/flatland-player",
+    "env": {
+      "PLAYER_SCRIPTED": "timetable",
+      "PLAYER_POLICY_LABEL": "timetable"
+    }
+  },
+  {
+    "name": "flatland-yielder",
+    "run": "/bin/flatland-player",
+    "env": {
+      "PLAYER_SCRIPTED": "yielder",
+      "PLAYER_POLICY_LABEL": "yielder"
+    }
+  }
+]

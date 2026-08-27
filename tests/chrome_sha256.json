@@ -1,0 +1,4 @@
+{
+  "chrome_common.js": "7ace7287e0d19bf0fddb2362c55e4d76dfb44adcd4fbc8d1743b0557ced72f7c",
+  "_note": "chrome_common.js is copied byte-for-byte from Metta-AI/coworld-ctf @ e356bdd; this pin is the starter's file."
+}

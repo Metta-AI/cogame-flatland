@@ -1,0 +1,419 @@
+<!-- ============================================================
+     FLATLAND additions to the inherited coworld-ctf chrome
+     ============================================================
+     Everything above this banner is the starter's classic broadcast page,
+     edited only where the design note §Viewer says: `#viewpanel` (zoom bar +
+     minimap) is dropped because the board is a fixed 28x14 grid that
+     relayout() letterboxes whole at every width; `#fpv*` and `#povBadge` are
+     dropped because there is no per-train point of view worth showing - the
+     whole network is the shot; the never-emitted paintbot beat kinds and the
+     `.ec-heart` endcard glyphs are dropped; and the chrome vocabulary is
+     re-labelled from the note's table. The splice hook is the starter's own:
+     `window.FlatlandChrome.install(PB_CTX)` / `.frame(s, ctx, jumped)` /
+     `.event(e, s, ctx)`, with the same signatures.
+
+     NOTHING HERE TOUCHES THE TRANSPORT BAND. relayout() still owns
+     --hudscale, --topband and --band on :root; the endcard still stops at
+     bottom: var(--band, 0px) and is still dismissed by every seek; and every
+     scrubber beat this block draws is a LABELLED, CLICKABLE BUTTON that seeks
+     on click, styled for EVERY kind this game emits and no others - arrival,
+     malfunction, deadlock, fallback, end. The builder is called `railBeat`
+     precisely so it can never be shadowed by the chrome alias block's own
+     beat-marker alias (the tandem 2026-08-23 hoisting trap).
+     ============================================================ -->
+<style>
+/* The policy name is the one string that must never collapse to "…" in the
+   ~360px featured-match iframe (the bullwhip scorebug scar). */
+.plate-name {
+  flex: 1 1 auto;
+  min-width: 3.2em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* the plate's arrived-of-fleet chip (the paintbot hill chip's slot) */
+.plate-chip {
+  font-family: var(--pixfont);
+  font-size: calc(11 * var(--u));
+  min-width: calc(30 * var(--u));
+  text-align: center;
+  align-self: center;
+}
+.plate-late {
+  font-size: calc(9 * var(--u));
+  color: var(--paper-dim);
+  letter-spacing: calc(0.4 * var(--u));
+}
+.ontime-label {
+  font-size: calc(9 * var(--u));
+  letter-spacing: calc(0.6 * var(--u));
+  text-transform: uppercase;
+  color: var(--paper-dim);
+  align-self: center;
+}
+
+/* ---- the on-time leaderboard rail (the idea's ask), in the TOP band ---- */
+#ontime-rail {
+  position: absolute;
+  left: calc(8 * var(--u));
+  top: calc(var(--topband) + 6 * var(--u));
+  display: flex;
+  flex-direction: column;
+  gap: calc(2 * var(--u));
+  padding: calc(4 * var(--u)) calc(6 * var(--u));
+  border-radius: calc(3 * var(--u));
+  background: rgba(18, 13, 9, 0.62);
+  font-family: var(--finefont);
+  font-size: calc(10 * var(--u));
+  color: var(--paper);
+  pointer-events: none;
+  z-index: 6;
+}
+#ontime-rail .rail-cap {
+  font-size: calc(8 * var(--u));
+  letter-spacing: calc(0.8 * var(--u));
+  color: var(--paper-dim);
+  text-transform: uppercase;
+}
+.rail-row { display: flex; align-items: center; gap: calc(4 * var(--u)); }
+.rail-chip {
+  width: calc(8 * var(--u));
+  height: calc(8 * var(--u));
+  border-radius: calc(2 * var(--u));
+  flex: 0 0 auto;
+}
+.rail-alias { width: 4.2em; letter-spacing: calc(0.4 * var(--u)); }
+.rail-name {
+  flex: 1 1 auto;
+  min-width: 3.2em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--paper-dim);
+}
+.rail-score { font-variant-numeric: tabular-nums; }
+.rail-late { color: var(--paper-dim); font-size: calc(9 * var(--u)); }
+.rail-fb { color: var(--amber); }
+
+/* ---- the deadlock alarm (the idea's other ask) ---- */
+#alarm-chip {
+  position: absolute;
+  right: calc(8 * var(--u));
+  top: calc(var(--topband) + 6 * var(--u));
+  display: none;
+  align-items: center;
+  gap: calc(4 * var(--u));
+  padding: calc(3 * var(--u)) calc(7 * var(--u));
+  border-radius: calc(3 * var(--u));
+  font-family: var(--pixfont);
+  font-size: calc(11 * var(--u));
+  letter-spacing: calc(1 * var(--u));
+  color: #180d09;
+  z-index: 6;
+  pointer-events: none;
+}
+#alarm-chip.on { display: flex; }
+#alarm-chip.jam { background: var(--amber); }
+#alarm-chip.deadlock { background: var(--red); color: var(--paper); animation: alarmpulse 1s steps(2) infinite; }
+@keyframes alarmpulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.55; } }
+
+/* ---- scrubber beats: CSS for EVERY kind this game emits, and no others -- */
+.beat-marker.arrival { background: var(--green); height: calc(8 * var(--u)); }
+.beat-marker.malfunction { background: var(--amber); height: calc(6 * var(--u)); }
+.beat-marker.deadlock {
+  background: var(--red);
+  width: calc(3 * var(--u));
+  height: calc(12 * var(--u));
+}
+.beat-marker.fallback { background: var(--paper-dim); height: calc(5 * var(--u)); opacity: 0.7; }
+.beat-marker.end { background: var(--paper); width: calc(3 * var(--u)); height: calc(12 * var(--u)); }
+button.beat-marker { border: 0; padding: 0; cursor: pointer; }
+button.beat-marker:focus-visible { outline: 1px solid var(--amber); }
+
+/* the plate's arrived-of-fleet chip (the paintbot hill chip's slot) */
+.plate-chip {
+  font-family: var(--pixfont);
+  font-size: calc(11 * var(--u));
+  min-width: calc(30 * var(--u));
+  text-align: center;
+  align-self: center;
+}
+.plate-late {
+  font-size: calc(9 * var(--u));
+  color: var(--paper-dim);
+  letter-spacing: calc(0.4 * var(--u));
+}
+
+/* ---- legible at 360px: the four rules the design note pins ------------- */
+#stage.tiny .plate .ontime-label { display: none; }
+#stage.tiny .rail-late { display: none; }
+#stage.tiny #ontime-rail .rail-chip { width: calc(6 * var(--u)); height: calc(6 * var(--u)); }
+#stage.tiny #alarm-chip .alarm-trains { display: none; }
+</style>
+<script>
+(function () {
+  'use strict';
+
+  // CTX is the classic chrome handed over by install(); nothing in this block
+  // re-implements naming, escaping, feed insertion or the transport.
+  var CTX = null;
+  var railEl = null;
+  var alarmEl = null;
+  var placedBeats = {};
+  var lastAlarm = '';
+
+  function byId(id) { return document.getElementById(id); }
+
+  function ensureRail() {
+    if (railEl) return railEl;
+    var chrome = byId('chrome');
+    if (!chrome) return null;
+    railEl = document.createElement('div');
+    railEl.id = 'ontime-rail';
+    railEl.innerHTML = '<span class="rail-cap">On time</span>';
+    chrome.appendChild(railEl);
+    return railEl;
+  }
+
+  function ensureAlarm() {
+    if (alarmEl) return alarmEl;
+    var chrome = byId('chrome');
+    if (!chrome) return null;
+    alarmEl = document.createElement('div');
+    alarmEl.id = 'alarm-chip';
+    chrome.appendChild(alarmEl);
+    return alarmEl;
+  }
+
+  // A LABELLED, CLICKABLE BUTTON, never an unlabelled div. Named railBeat so
+  // it can never shadow the chrome alias block's own beat-marker alias.
+  function railBeat(s, tick, kind, slot, label) {
+    var key = tick + '|' + kind + '|' + slot;
+    if (placedBeats[key]) return;
+    placedBeats[key] = true;
+    var scrub = byId('scrub');
+    if (!scrub) return;
+    var st = Math.max(0, s.st || 0);
+    var mx = Math.max(st + 1, s.mx || 1);
+    var el = document.createElement('button');
+    el.type = 'button';
+    el.className = 'beat-marker ' + kind;
+    el.style.left = (Math.min(1, Math.max(0, (tick - st) / (mx - st))) * 100) + '%';
+    el.title = label + ' — click to jump here';
+    el.setAttribute('aria-label', label + ' at tick ' + tick);
+    el.addEventListener('click', function (ev) {
+      ev.stopPropagation();
+      if (CTX) CTX.send('s:' + tick);
+    });
+    scrub.appendChild(el);
+  }
+
+  function renderRail(s) {
+    var rail = ensureRail();
+    if (!rail) return;
+    var roster = s.roster || [];
+    var teams = s.teams || {};
+    var rows = roster.map(function (p) {
+      var t = teams[p.team] || {};
+      return {
+        slot: p.s,
+        alias: p.alias || ('SEAT ' + p.s),
+        name: p.name || '',
+        team: p.team,
+        onTime: t.onTime || 0,
+        arrived: t.arrived || 0,
+        fleet: t.fleet || 0,
+        late: t.late || 0,
+        fb: p.fb || 0
+      };
+    });
+    rows.sort(function (a, b) { return b.onTime - a.onTime || a.slot - b.slot; });
+    var html = '<span class="rail-cap">On time</span>';
+    rows.forEach(function (r) {
+      html += '<div class="rail-row">' +
+        '<i class="rail-chip" style="background:' + (CTX.teamCol(r.team) || '#f2e8d8') + '"></i>' +
+        '<span class="rail-alias">' + CTX.esc(r.alias.toUpperCase()) + '</span>' +
+        '<span class="rail-name">' + CTX.esc(r.name) + '</span>' +
+        '<span class="rail-score">' + r.onTime + ' / ' + r.arrived + ' of ' + r.fleet + '</span>' +
+        '<span class="rail-late">late ' + r.late + '</span>' +
+        (r.fb ? '<span class="rail-fb" title="took a scripted fallback">\u21af</span>' : '') +
+        '</div>';
+    });
+    if (rail.innerHTML !== html) rail.innerHTML = html;
+  }
+
+  function renderAlarm(s) {
+    var chip = ensureAlarm();
+    if (!chip) return;
+    var deadlock = s.deadlock || [];
+    var jam = s.jam || [];
+    var kind = deadlock.length ? 'deadlock' : (jam.length ? 'jam' : '');
+    var ids = deadlock.length ? deadlock : jam;
+    if (!kind) {
+      if (chip.className !== 'alarm-off') { chip.className = 'alarm-off'; chip.textContent = ''; }
+      lastAlarm = '';
+      return;
+    }
+    var since = kind === 'deadlock' ? Math.max(0, s.t - (s.deadlockSince || s.t)) : 0;
+    var shown = ids.slice(0, 2).join(' \u00b7 ') + (ids.length > 2 ? ' +' + (ids.length - 2) : '');
+    chip.className = 'on ' + kind;
+    chip.innerHTML = '<b>' + kind.toUpperCase() + '</b>' +
+      '<span class="alarm-trains">' + CTX.esc(shown) + '</span>' +
+      (kind === 'deadlock' ? '<span>' + since + ' ticks</span>' : '');
+    if (kind === 'deadlock' && lastAlarm !== 'deadlock') {
+      CTX.banner('DEADLOCK — ' + shown, 'red');
+    }
+    lastAlarm = kind;
+  }
+
+  function renderClockLines(s) {
+    var time = byId('clock-time');
+    var cap = byId('clock-caption');
+    if (!time || !cap || s.ph === 'lobby') return;
+    time.textContent = 'ON TIME ' + (s.onTime || 0);
+    cap.textContent = '/ ' + (s.par || 0) + ' par \u00b7 tick ' + s.t + '/' + s.mt +
+      ' \u00b7 turn ' + Math.min(s.turn || 1, s.turns || 1) + '/' + (s.turns || 1) +
+      ' \u00b7 arrived ' + (s.arrived || 0) + ' \u00b7 broken ' + (s.broken || 0) +
+      ' \u00b7 deadlock ' + ((s.deadlock || []).length);
+  }
+
+  function renderEndcardExtras(s) {
+    if (s.ph !== 'gameover' || !s.over) return;
+    var head = byId('ec-headline');
+    var how = byId('ec-how');
+    var cond = byId('ec-wincond');
+    var over = s.over;
+    if (head) {
+      head.textContent = over.fleetOnTime + ' OF ' + (s.fleet || 0) +
+        ' TRAINS ON TIME — PAR ' + over.par +
+        (over.fleetOnTime >= over.par ? ' MET' : ' MISSED');
+      head.style.color = (s.deadlock || []).length ? 'var(--red)' : '';
+    }
+    if (cond) {
+      cond.textContent = 'NETWORK SCORE ' + over.score;
+    }
+    if (how) {
+      how.textContent = over.malfunctions + ' breakdowns, ' + over.jams +
+        ' jams, ' + over.deadlocks + ' deadlocks, ' + over.jamTicks +
+        ' ticks lost (' + over.endRule + ')';
+    }
+    var chip = byId('win-chip');
+    if (chip) {
+      chip.textContent = over.fleetOnTime >= over.par ? 'PAR MET' : 'PAR MISSED';
+      chip.className = 'win-chip show ' +
+        (over.fleetOnTime >= over.par ? 'draw' : '');
+    }
+  }
+
+  function feedRow(html, cls) {
+    var row = document.createElement('div');
+    row.className = 'feed-row ' + (cls || '');
+    row.innerHTML = html;
+    CTX.pushFeed(row);
+  }
+
+  function aliasOf(s, slot) {
+    var roster = s.roster || [];
+    for (var i = 0; i < roster.length; i++) {
+      if (roster[i].s === slot) return (roster[i].alias || '').toUpperCase();
+    }
+    return 'SEAT ' + slot;
+  }
+
+  // Plain language, never internal notation.
+  function flEvent(e, s, ctx) {
+    CTX = ctx;
+    switch (e.k) {
+      case 'depart':
+        feedRow(CTX.esc(e.train) + ' departs ' + CTX.esc(e.station || '—'));
+        return true;
+      case 'arrive':
+        feedRow('<b>' + CTX.esc(e.train) + '</b> arrives ' + CTX.esc(e.station) +
+          ' — ' + (e.onTime ? 'ON TIME' : e.lateness + ' LATE') +
+          ' (' + e.total + ' in)');
+        railBeat(s, e.tick, 'arrival', e.slot,
+          e.train + ' arrives ' + e.station);
+        return true;
+      case 'malfunction':
+        feedRow(CTX.esc(e.train) + ' BREAKS DOWN at (' + e.cell[0] + ',' +
+          e.cell[1] + ') — ' + e.duration + ' ticks');
+        railBeat(s, s.t, 'malfunction', -1, e.train + ' breaks down');
+        return true;
+      case 'repaired':
+        feedRow(CTX.esc(e.train) + ' repaired');
+        return true;
+      case 'jam':
+        feedRow('JAM — ' + CTX.esc((e.trains || []).join(' \u00b7 ')));
+        return true;
+      case 'jamclear':
+        feedRow('jam cleared after ' + (e.ticks || 0) + ' ticks');
+        return true;
+      case 'deadlock':
+        feedRow('<b>DEADLOCK — ' + CTX.esc((e.trains || []).join(' \u00b7 ')) +
+          '</b>', 'red');
+        railBeat(s, e.tick, 'deadlock', -1,
+          'deadlock: ' + (e.trains || []).join(' vs '));
+        return true;
+      case 'deadlockclear':
+        feedRow('DEADLOCK BROKEN AFTER ' + (e.ticks || 0) + ' TICKS');
+        CTX.banner('DEADLOCK BROKEN', 'amber');
+        return true;
+      case 'say':
+        feedRow('<i>' + CTX.esc(aliasOf(s, e.slot)) + ':</i> \u201c' +
+          CTX.esc(e.text) + '\u201d', 'say');
+        return true;
+      case 'order':
+        if (e.verb === 'siding') {
+          feedRow(CTX.esc(aliasOf(s, e.slot)) + ' sides ' + CTX.esc(e.train) +
+            ' into ' + CTX.esc(e.arg));
+        } else if (e.verb === 'hold') {
+          feedRow(CTX.esc(aliasOf(s, e.slot)) + ' holds ' + CTX.esc(e.train));
+        } else if (e.verb === 'route') {
+          feedRow(CTX.esc(aliasOf(s, e.slot)) + ' routes ' + CTX.esc(e.train) +
+            ' via ' + CTX.esc(e.arg));
+        }
+        return true;
+      case 'fallback':
+        feedRow('<b>' + CTX.esc(aliasOf(s, e.slot)) +
+          ' MISSED THE CALL</b> — scripted orders (' + CTX.esc(e.cause) + ')');
+        railBeat(s, s.t, 'fallback', e.slot,
+          aliasOf(s, e.slot) + ' missed the call');
+        return true;
+      case 'turn':
+        return true;
+      case 'end':
+        railBeat(s, s.t, 'end', -1,
+          e.fleetOnTime + ' of ' + e.arrivedTotal + ' on time');
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  function flFrame(s, ctx, jumped) {
+    CTX = ctx;
+    if (jumped) placedBeats = {};
+    // The up-front beat timeline, shipped ONCE by the pre-scan: every marker is
+    // placed before playback reaches it, as a labelled button.
+    if (s.beats && s.beats.length) {
+      for (var i = 0; i < s.beats.length; i++) {
+        var b = s.beats[i];
+        railBeat(s, b.t, b.k, b.slot == null ? -1 : b.slot, b.label || b.k);
+      }
+    }
+    renderRail(s);
+    renderAlarm(s);
+    renderClockLines(s);
+    renderEndcardExtras(s);
+  }
+
+  window.FlatlandChrome = {
+    install: function (ctx) { CTX = ctx; ensureRail(); ensureAlarm(); },
+    frame: flFrame,
+    event: flEvent
+  };
+})();
+</script>
+
+</body>
+</html>

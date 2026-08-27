@@ -1,0 +1,12 @@
+# ONE service, because the manifest's image placeholder is derived from the
+# compose SERVICE NAME (`service flatland` -> `{{FLATLAND_IMAGE}}`);
+# `{{GAME_IMAGE}}` is not a thing (the lantern 0.1.0 scar). The two
+# entrypoints (/bin/flatland and /bin/flatland-player) live in this one image.
+services:
+  flatland:
+    image: coworld-flatland:latest
+    platform: linux/amd64
+    build:
+      context: .
+      dockerfile: Dockerfile
+      network: host
