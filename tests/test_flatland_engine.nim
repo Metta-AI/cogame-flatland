@@ -15,7 +15,8 @@ echo "test_flatland_engine"
 
 proc runEpisode(seats: array[4, string], config: JsonNode,
                 extraEnv: seq[(string, string)] = @[]):
-    tuple[results: JsonNode, replay: string, log: string, exit: int] =
+    tuple[results: JsonNode, replay: string, events: string, log: string,
+          exit: int] =
   ## Starts the built game binary and one player process per seat, exactly as
   ## `tools/ci/docker_smoke.sh` does but without Docker.
   let root = repoRoot()
@@ -68,11 +69,25 @@ proc runEpisode(seats: array[4, string], config: JsonNode,
     result.results = newJObject()
   if fileExists(work / "episode.replay"):
     result.replay = readFile(work / "episode.replay")
+  if fileExists(work / "events.jsonl"):
+    result.events = readFile(work / "events.jsonl")
   if fileExists(work / "player_failure.json"):
     result.log.add("\nPLAYER FAILURE: " & readFile(work / "player_failure.json"))
     result.results["__failurePayload"] = parseJson(
       readFile(work / "player_failure.json"))
   removeDir(work)
+
+proc eventKinds(jsonl: string): seq[string] =
+  ## Every distinct `kind` in a COGAME_EVENTS_URI file, summary row excluded.
+  for line in jsonl.splitLines():
+    if line.strip().len == 0:
+      continue
+    let node = parseJson(line)
+    if node{"type"}.getStr() == "summary":
+      continue
+    let kind = node{"kind"}.getStr()
+    if kind notin result:
+      result.add(kind)
 
 proc fixtureConfig(overrides: JsonNode = nil): JsonNode =
   result = %*{
@@ -132,6 +147,41 @@ check "seed 42 exercises arrivals AND the breakdown path inside 200 ticks":
   doAssert episode.results{"malfunctions"}.getInt() > 0,
     "the CI smoke replay must always exercise the breakdown path"
 
+check "the tier-2 event stream carries the turn and directive rows":
+  # `SimEventKind` declares TurnStart, DirectiveIssued and FallbackTaken and
+  # `events.nim` maps all three; nothing emitted any of them, so the analysis
+  # file the design note describes carried only the sim-derived rows.
+  doAssert episode.events.len > 0, "no events file was written\n" & episode.log
+  let kinds = eventKinds(episode.events)
+  var declared: seq[string]
+  for kind in SimEventKind:
+    declared.add(kind.key())
+  for kind in kinds:
+    doAssert kind in declared,
+      "the events file carries " & kind & ", outside the closed enum"
+  for kind in ["phase", "turn_start", "directive", "depart", "arrive"]:
+    doAssert kind in kinds, "the events file has no " & kind & " row: " & $kinds
+  var turnRows = 0
+  var directiveRows = 0
+  for line in episode.events.splitLines():
+    if line.strip().len == 0:
+      continue
+    let node = parseJson(line)
+    case node{"kind"}.getStr()
+    of "turn_start":
+      inc turnRows
+      doAssert node{"amount"}.getInt() == turnRows, "turns must be in order"
+    of "directive":
+      inc directiveRows
+      doAssert node{"slot"}.getInt() in 0 .. 3
+      doAssert node{"content"}.getStr() in ["llm", "scripted", "fallback"]
+    else: discard
+  doAssert turnRows > 1, "only " & $turnRows & " turn_start rows"
+  doAssert directiveRows == turnRows * 4,
+    $directiveRows & " directive rows for " & $turnRows & " turns"
+  # the summary row is part of the contract
+  doAssert "\"type\":\"summary\"" in episode.events
+
 # 27. no seat can stall the episode ------------------------------------------
 check "a seat that never connects does not stop the clock":
   let starved = runEpisode(["yielder", "timetable", "yielder", ""],
@@ -142,6 +192,9 @@ check "a seat that never connects does not stop the clock":
   doAssert starved.results{"deadSeats"}[3].getBool(),
     "the absent seat must be reported dead"
   doAssert starved.results{"arrivedTotal"}.getInt() >= 0
+  doAssert "fallback" in eventKinds(starved.events),
+    "a disconnected seat must leave a fallback row in the tier-2 stream: " &
+    $eventKinds(starved.events)
   let payload = starved.results{"__failurePayload"}
   if payload != nil:
     var keys: seq[string]

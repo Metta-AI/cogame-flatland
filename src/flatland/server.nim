@@ -279,6 +279,13 @@ proc runTurn(engine: var Engine) =
   let turnIndex = (engine.game.tick div engine.game.config.turnTicks) + 1
   engine.game.turn = turnIndex
   let elapsed = int((getMonoTime() - engine.episodeStart).inSeconds)
+  # The tier-2 stream's decision rows. `SimEventKind` declares TurnStart,
+  # DirectiveIssued and FallbackTaken and `events.nim` maps all three to JSON
+  # keys, but nothing emitted them, so the COGAME_EVENTS_URI file carried no
+  # turn, directive or fallback row at all. They go through `emitAnalysis`, not
+  # `emit`: they are decisions, not physics, and must not reach `frameEvents`.
+  engine.game.emitAnalysis(SimEvent(tick: engine.game.tick, kind: TurnStart,
+                                    amount: turnIndex, train: -1, slot: -1))
   let outcome = engine.decision.turn(engine.game, turnIndex, elapsed)
   engine.game.feedDirectives.setLen(0)
   var turnRecords: seq[JsonNode]
@@ -303,6 +310,9 @@ proc runTurn(engine: var Engine) =
     engine.chatRecords.add(record)
     engine.writer.writeChat(record)
     engine.game.feedDirectives.add(record)
+    engine.game.emitAnalysis(SimEvent(tick: engine.game.tick,
+      kind: DirectiveIssued, train: -1, slot: seat,
+      amount: directive.orders.len, content: $directive.source))
     try:
       turnRecords.add(parseJson(record))
     except CatchableError:
@@ -311,7 +321,13 @@ proc runTurn(engine: var Engine) =
     engine.chatRecords.add(record)
     engine.writer.writeChat(record)
     try:
-      turnRecords.add(parseJson(record))
+      let node = parseJson(record)
+      turnRecords.add(node)
+      if node{"k"}.getStr() == "fallback":
+        engine.game.emitAnalysis(SimEvent(tick: engine.game.tick,
+          kind: FallbackTaken, train: -1, slot: node{"slot"}.getInt(),
+          amount: node{"attempt"}.getInt(),
+          content: node{"cause"}.getStr()))
     except CatchableError:
       discard
   engine.game.closeTurn()

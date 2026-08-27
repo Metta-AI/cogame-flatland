@@ -99,6 +99,14 @@ proc emit(sim: SimServer, event: SimEvent) =
   sim.events.add(event)
   sim.frameEvents.add(event)
 
+proc emitAnalysis*(sim: SimServer, event: SimEvent) =
+  ## Tier-2 ONLY. Turn, directive and fallback rows are decisions, not physics:
+  ## they belong in the `COGAME_EVENTS_URI` stream but not in `frameEvents`,
+  ## which the broadcast and the replay pre-scan derive from the tick. Like
+  ## every `SimEvent` they never enter `gameHash`, so nothing here can move a
+  ## replay.
+  sim.events.add(event)
+
 proc newSimServer*(config: GameConfig): SimServer =
   ## Builds the world from the resolved config. The network is
   ## `pool[seed mod 3]`; every other seeded draw follows in `setupTrains`.
