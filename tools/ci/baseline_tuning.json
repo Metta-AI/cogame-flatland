@@ -1,11 +1,11 @@
 {
   "baseline": "yielder",
-  "yieldAfter": 4,
+  "yieldAfter": 12,
   "departLookahead": 1,
   "sidingLookahead": 2,
   "lowerIdYields": false,
   "sweep": {
-    "onTime": 166,
-    "deadlocks": 20
+    "onTime": 172,
+    "deadlocks": 24
   }
 }

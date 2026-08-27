@@ -27,7 +27,7 @@ type
 
 const
   DefaultBaselineParams* = BaselineParams(
-    yieldAfter: 4,
+    yieldAfter: 12,
     departLookahead: 1,
     sidingLookahead: 2,
     lowerIdYields: false
@@ -84,23 +84,40 @@ proc sidingAhead(world: BaselineWorld, train: Train, limit: int): string =
 proc nextSingleTrackConflict(world: BaselineWorld, index: int,
                              train: Train): bool =
   ## True when the next single-track section on this train's route (an edge
-  ## with no parallel partner) already holds a train travelling the other way.
-  var edgeSeen = -1
+  ## with no parallel partner) already holds a train travelling the OTHER way.
+  ##
+  ## Both directions are read the way the sim reads them (`trainDirectionOnEdge`
+  ## in sim.nim): a train runs A to B along an edge exactly when its HEADING
+  ## equals `edgeFwd` at the cell it is standing on. `edgeFwd` is a per-cell MAP
+  ## CONSTANT, so comparing it at two cells of the same edge compares two
+  ## constants and says nothing about anybody's direction: equal at every cell
+  ## of a straight edge, so the rule never fired there, and different across a
+  ## curve, so it fired at any occupant travelling either way.
+  var prev = train.cell
+  if prev < 0:
+    return false
   for cell in train.route:
     let edge = world.map.edgeOf[cell]
     if edge < 0 or world.map.edges[edge].parallel:
+      prev = cell
       continue
-    if edgeSeen >= 0 and edge != edgeSeen:
-      break
-    edgeSeen = edge
+    var entry = -1
+    for d in 0 .. 3:
+      if world.map.step(prev, Dir(d)) == cell:
+        entry = d
+        break
+    if entry < 0:
+      return false                 ## a stale route: claim nothing
+    let ours = if world.map.edgeFwd[cell] == Dir(entry): 1 else: -1
     for other, t in world.trains:
       if other == index or not t.onGrid():
         continue
       if world.map.edgeOf[t.cell] != edge:
         continue
-      if world.map.edgeFwd[t.cell] != world.map.edgeFwd[cell]:
+      let theirs = if world.map.edgeFwd[t.cell] == t.heading: 1 else: -1
+      if theirs != ours:
         return true
-    break
+    return false
   false
 
 proc blockerOf(world: BaselineWorld, index: int): int =
