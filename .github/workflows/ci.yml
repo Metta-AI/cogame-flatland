@@ -110,6 +110,18 @@ jobs:
           python3 tools/author_rail_maps.py --check
           python3 tools/build_broadcast_page.py --check
 
+      - name: Re-run the baseline tuning sweep
+        # Design note §Tests 24. The four `DefaultBaselineParams` are the
+        # sweep's PICK, not a guess: --check re-runs the 5x3x3x2 grid (24
+        # episodes per candidate, both pools) and fails if the committed
+        # tools/ci/baseline_tuning.json is no longer what the sweep chooses.
+        # tests/test_flatland_driver.nim pins the shipped consts against that
+        # JSON, so the two gates together mean a change to the baseline rules
+        # cannot ship with stale tunables. ~10 s in release.
+        run: |
+          set -euo pipefail
+          nim c -r --hints:off -d:release --path:src tools/tune_baselines.nim --check
+
       - name: Run tests
         # Every tests/*.nim runs twice: debug (range/overflow checks, stack
         # traces) and -d:release (release-only compile errors and codegen bugs
