@@ -183,4 +183,27 @@ check "an LLM seat with no credentials records a fallback, not a scripted turn":
   doAssert "no_credentials" in causes, $causes
   doAssert outcome.directives[0].source == dsFallback
 
+check "a seat that never registered is a DISCONNECTED fallback, not scripted":
+  # `cause` is a closed enum of seven in the design note; `disconnected` was
+  # the one no path could produce, because an unregistered seat fell through to
+  # the scripted branch and was recorded as a policy it never chose.
+  let game = playScripted(7, [blYielder, blYielder, blYielder, blYielder],
+                          maxTicks = 64)
+  var engine = initDecisionEngine(game)
+  for seat in 0 ..< 4:
+    engine.seats[seat].registered = seat < 3
+  let outcome = engine.turn(game, 1, 0)
+  var causes: seq[string]
+  for record in outcome.records:
+    let node = parseJson(record)
+    if node{"k"}.getStr() == "fallback":
+      causes.add(node{"cause"}.getStr() & "/" & $node{"slot"}.getInt())
+  doAssert "disconnected/3" in causes, $causes
+  doAssert outcome.directives[3].source == dsFallback
+  doAssert outcome.directives[3].orders.len > 0,
+    "a dead seat's fleet still gets orders"
+  for seat in 0 ..< 3:
+    doAssert outcome.directives[seat].source == dsScripted,
+      "a registered scripted seat is not a fallback"
+
 echo "test_flatland_engine: ", checks, " checks ok"

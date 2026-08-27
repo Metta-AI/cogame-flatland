@@ -193,6 +193,17 @@ proc turn*(engine: var DecisionEngine, game: SimServer, turnIndex: int,
         "the LLM is unavailable for this turn; playing yielder"))
       echo "flatland llm: seat ", seat, " falling back to yielder (", cause,
         ") on turn ", turnIndex
+    elif not engine.seats[seat].registered:
+      ## A seat that never registered is DISCONNECTED, not a scripted policy.
+      ## Its fleet still gets yielder orders — no failure mode leaves a train
+      ## without one — but it is recorded as the fallback it is, with the
+      ## seventh cause the design note names, so `results.fallbackTurns[s]`
+      ## and phase 60 can tell a dead seat from a scripted one.
+      var directive = engine.yielderFor(game, seat)
+      directive.source = dsFallback
+      result.directives[seat] = directive
+      result.records.add(fallbackRecord(turnIndex, seat, 1, "disconnected",
+        "the seat never registered; its fleet is dispatched by yielder"))
     else:
       var directive = scriptedDirective(engine.worldFor(game),
                                         engine.seats[seat].baseline,
