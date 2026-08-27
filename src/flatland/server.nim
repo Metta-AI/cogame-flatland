@@ -314,14 +314,7 @@ proc runTurn(engine: var Engine) =
       turnRecords.add(parseJson(record))
     except CatchableError:
       discard
-  for i in 0 ..< engine.game.trains.len:
-    engine.game.trains[i].blockedLastTurn = engine.game.trains[i].blockedTicks
-    case engine.game.trains[i].state
-    of tsRunning: engine.game.trains[i].lastResult = orRunning
-    of tsHeld: engine.game.trains[i].lastResult = orHeld
-    of tsMalfunctioning: engine.game.trains[i].lastResult = orMalfunction
-    of tsArrived: engine.game.trains[i].lastResult = orArrived
-    else: discard
+  engine.game.closeTurn()
   engine.broadcastFrame(turnEvents(engine.game, turnIndex, turnRecords), false)
 
 proc writeArtifacts(engine: var Engine) =

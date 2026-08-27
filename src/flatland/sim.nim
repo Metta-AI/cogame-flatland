@@ -479,6 +479,27 @@ proc startPlaying*(sim: SimServer) =
     sim.phase = Playing
     sim.emit(SimEvent(tick: sim.tick, kind: PhaseChange, content: "playing"))
 
+proc closeTurn*(sim: SimServer) =
+  ## Rolls the per-turn per-train counters over at a turn boundary.
+  ##
+  ## `blockedLastTurn` is what the observation reports as
+  ## `blocked_ticks_last_turn`, and the design note says LAST TURN.
+  ## `blockedTicks` is only ever incremented (steps 7, 7b, 7c) and never
+  ## reset, so assigning it straight across reported the episode-to-date
+  ## total: a train refused once on turn 2 still read `blocked_ticks_last_turn:
+  ## 1` on turn 31, and a seat could not tell a section that is blocking it now
+  ## from one that blocked it half an hour ago.
+  for i in 0 ..< sim.trains.len:
+    sim.trains[i].blockedLastTurn =
+      sim.trains[i].blockedTicks - sim.trains[i].blockedAtTurn
+    sim.trains[i].blockedAtTurn = sim.trains[i].blockedTicks
+    case sim.trains[i].state
+    of tsRunning: sim.trains[i].lastResult = orRunning
+    of tsHeld: sim.trains[i].lastResult = orHeld
+    of tsMalfunctioning: sim.trains[i].lastResult = orMalfunction
+    of tsArrived: sim.trains[i].lastResult = orArrived
+    else: discard
+
 # ---------------------------------------------------------------------------
 #  The per-seat observation
 # ---------------------------------------------------------------------------

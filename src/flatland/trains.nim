@@ -27,7 +27,8 @@ type
     malfunctionTicks*: int
     stalledTicks*: int
     blockedTicks*: int
-    blockedLastTurn*: int
+    blockedAtTurn*: int         ## `blockedTicks` at the last turn boundary
+    blockedLastTurn*: int       ## refusals SINCE that boundary, not the total
     arrivalTick*: int
     lateness*: int
     onTime*: bool

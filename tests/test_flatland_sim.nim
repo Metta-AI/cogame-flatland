@@ -123,6 +123,37 @@ check "blocked trains accrue blockedTicks and never swap cells":
     "trains may never swap cells"
   doAssert game.trains[0].blockedTicks >= 1 or game.trains[0].cell != a
 
+check "blocked_ticks_last_turn counts THIS turn's refusals, not the episode's":
+  let game = emptyBoard()
+  let run = game.straightRun()
+  let cells = game.map.edges[game.map.edgeOf[run.cell]].cells
+  doAssert cells.len >= 3
+  game.placeTrain(0, cells[2], game.map.edgeFwd[cells[2]])
+  game.placeTrain(1, cells[1], game.map.edgeFwd[cells[1]])
+  game.trains[0].order = TrainOrder(verb: ovHold)
+  game.trains[1].order = TrainOrder(verb: ovRun)
+  game.trains[1].route = @[cells[2]]
+  for _ in 0 ..< 5:
+    game.step()
+  game.closeTurn()
+  doAssert game.trains[1].blockedLastTurn == 5,
+    "turn 1 refused it 5 times, reported " & $game.trains[1].blockedLastTurn
+  doAssert game.trains[1].blockedTicks == 5
+  for _ in 0 ..< 3:
+    game.step()
+  game.closeTurn()
+  doAssert game.trains[1].blockedTicks == 8, "the episode total keeps counting"
+  doAssert game.trains[1].blockedLastTurn == 3,
+    "blocked_ticks_last_turn is LAST TURN, not the episode-to-date total: " &
+    $game.trains[1].blockedLastTurn
+  doAssert game.seatObservation(0, 2, 31){"your_trains"}[1]{
+    "blocked_ticks_last_turn"}.getInt() == 3
+  # a turn in which nothing was refused reports zero, not the old total
+  game.trains[1].order = TrainOrder(verb: ovHold)
+  game.step()
+  game.closeTurn()
+  doAssert game.trains[1].blockedLastTurn == 0
+
 # 6. dead end ----------------------------------------------------------------
 check "dead end: the train reverses and steps back":
   let map = loadRailMap("branch_a")
