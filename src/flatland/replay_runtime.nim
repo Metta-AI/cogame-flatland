@@ -51,14 +51,15 @@ const LullTicks* = 40
 proc configFromReplay*(replay: ReplayData): GameConfig =
   result = defaultGameConfig()
   let node = replay.configNode()
-  # `network` is recorded, but the sim re-derives it from `seed`; a mismatch
-  # would mean the pool changed under a committed replay, which is a
-  # GameVersion bump.
+  # `network` is the RESOLVED map name; the sim re-derives it from
+  # `networkPool` + `seed`, so the POOL is what has to be restored. A replay
+  # that carries neither is pre-`networkPool` and was mainline by default.
   var patch = newJObject()
-  for key in ["num_agents", "trainsPerSeat", "maxTicks", "turnTicks",
-              "parOnTime", "slackTicks", "minJourneyCells", "departStagger",
-              "malfunctionRate", "jamTicks", "deadlockTicks", "quiesceTicks",
-              "fastMode", "showPlayerLabels", "players", "slots"]:
+  for key in ["networkPool", "num_agents", "trainsPerSeat", "maxTicks",
+              "turnTicks", "parOnTime", "slackTicks", "minJourneyCells",
+              "departStagger", "malfunctionRate", "jamTicks", "deadlockTicks",
+              "quiesceTicks", "fastMode", "showPlayerLabels", "players",
+              "slots"]:
     if node.hasKey(key):
       patch[key] = node[key]
   if node.hasKey("minDuration"):

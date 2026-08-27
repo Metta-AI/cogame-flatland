@@ -10,7 +10,8 @@ import ./helpers
 echo "test_flatland_replay"
 
 proc record(seed: uint64, kinds: array[4, Baseline], maxTicks: int,
-            forceStop: EndRule = erTickCap, stopAt = -1):
+            forceStop: EndRule = erTickCap, stopAt = -1,
+            pool = "mainline", trainsPerSeat = 6):
     tuple[bytes: string, game: SimServer] =
   ## Records one episode, optionally forcing a wall-clock or fault stop at a
   ## given tick — written as the LOAD-BEARING stop record, and applied by the
@@ -18,6 +19,9 @@ proc record(seed: uint64, kinds: array[4, Baseline], maxTicks: int,
   var config = defaultGameConfig()
   config.seed = seed
   config.maxTicks = maxTicks
+  config.networkPool = pool
+  config.trainsPerSeat = trainsPerSeat
+  config.parOnTime = if pool == "mainline": 15 else: 9
   let game = newSimServer(config)
   var writer = initReplayWriter(config.resolvedConfigJson(game.network))
   for slot in 0 ..< game.seatCount():
@@ -114,6 +118,49 @@ check "record -> re-derive matches at every tick, for every end reason":
     doAssert runtime.player.hashMismatchTick == -1,
       "hash mismatch at tick " & $runtime.player.hashMismatchTick &
       " on a " & $rule & " episode"
+
+# 29b. the OTHER pool re-derives too -----------------------------------------
+check "a branchline episode re-derives on the branchline map, every end reason":
+  # `newSimServer` derives the map as `pool[seed mod 3]`, so the replay has to
+  # carry the POOL. With only the resolved `network` name recorded, playback
+  # fell back to `defaultGameConfig().networkPool` — mainline — and rebuilt a
+  # 24-train mainline world for a 16-train branchline episode.
+  let kinds = [blYielder, blTimetable, blYielder, blTimetable]
+  let branchNames = poolNames("branchline")
+  block tickCap:
+    let (bytes, game) = record(2, kinds, 120, pool = "branchline",
+                               trainsPerSeat = 4)
+    doAssert game.network in branchNames,
+      "the recorded episode is not on a branchline map: " & game.network
+    doAssert game.trains.len == 16
+    let replay = parseReplayBytes(bytes)
+    doAssert replay.configNode(){"networkPool"}.getStr() == "branchline",
+      "the replay must record the POOL, not only the resolved network name"
+    let restored = configFromReplay(replay)
+    doAssert restored.networkPool == "branchline"
+    doAssert restored.trainsPerSeat == 4
+    let runtime = rederive(bytes)
+    doAssert runtime.sim.network == game.network,
+      "playback rebuilt " & runtime.sim.network & ", the episode was played " &
+      "on " & game.network
+    doAssert runtime.sim.trains.len == game.trains.len
+    doAssert runtime.player.hashMismatchTick == -1,
+      "hash mismatch at tick " & $runtime.player.hashMismatchTick &
+      " on a branchline episode"
+    doAssert runtime.sim.tick == game.tick
+    doAssert runtime.sim.arrivedTotal == game.arrivedTotal
+  for rule in [erWallClock, erFault]:
+    let (bytes, game) = record(5, kinds, 200, rule, stopAt = 96,
+                               pool = "branchline", trainsPerSeat = 4)
+    doAssert game.network in branchNames
+    doAssert game.endRule == rule
+    let runtime = rederive(bytes)
+    doAssert runtime.sim.network == game.network
+    doAssert runtime.sim.endRule == rule
+    doAssert runtime.sim.tick == game.tick
+    doAssert runtime.player.hashMismatchTick == -1,
+      "hash mismatch at tick " & $runtime.player.hashMismatchTick &
+      " on a branchline " & $rule & " episode"
 
 # 30. the replay is self-sufficient ------------------------------------------
 check "the bytes alone carry names, aliases, kinds, config, seed and result":

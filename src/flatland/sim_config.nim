@@ -217,12 +217,19 @@ proc update*(config: var GameConfig, node: JsonNode) =
 proc resolvedConfigJson*(config: GameConfig, network: string): string =
   ## The config block the replay carries: everything the viewer needs to
   ## reconstruct the episode, and never a token.
+  ##
+  ## `networkPool` is load-bearing. The sim re-derives its map as
+  ## `pool[seed mod 3]` (`newSimServer`), so a replay that records only the
+  ## resolved `network` NAME replays a `branchline` episode on a mainline map
+  ## with the wrong train count — the hash chain diverges at tick 1 and the
+  ## viewer draws a railway that was never played.
   var players = newJArray()
   for name in config.playerNames:
     players.add(%*{"name": name})
   $(%*{
     "seed": config.seed.int64,
     "network": network,
+    "networkPool": config.networkPool,
     "num_agents": config.numAgents,
     "trainsPerSeat": config.trainsPerSeat,
     "maxTicks": config.maxTicks,
