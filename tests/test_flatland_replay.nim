@@ -198,6 +198,29 @@ check "the bytes alone carry names, aliases, kinds, config, seed and result":
   doAssert orderRecords > 0
   doAssert replay.tickCount() == game.tick
 
+check "the observation carries your_notes and the replay's view does not":
+  # The system prompt promises the seat that `notes` comes back to it next turn
+  # and to nobody else (llm.nim, docs/DISPATCHING.md); the design note says the
+  # replay's `directive.view` is the observation MINUS that field.
+  var config = defaultGameConfig()
+  config.seed = 55
+  let game = newSimServer(config)
+  game.startPlaying()
+  game.seats[2].notes = "hold T15 until T02 clears J2"
+  let view = game.seatObservation(2, 1, 31)
+  doAssert view{"your_notes"}.getStr() == "hold T15 until T02 clears J2",
+    "the seat's own note must come back to it"
+  doAssert game.seatObservation(0, 1, 31){"your_notes"}.getStr() == "",
+    "a note is echoed to its own seat only"
+  let record = parseJson(directiveRecord(game, 1, 2,
+                                         defaultDirective(game.testContext(2)),
+                                         view))
+  doAssert record{"view"}.hasKey("network_status"), "the view is mirrored"
+  doAssert not record{"view"}.hasKey("your_notes"),
+    "the private note must not reach the replay"
+  doAssert view.hasKey("your_notes"),
+    "mirroring must not strip the field out of the live observation"
+
 # 31. replay_summary.py is strict UTF-8 JSON ---------------------------------
 check "tools/replay_summary.py prints strict UTF-8 JSON at every cap":
   var config = defaultGameConfig()

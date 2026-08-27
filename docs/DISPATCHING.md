@@ -64,7 +64,8 @@ malfunction draws; the network pool entry not selected.
   ],
   "radio": [{"from": "Alpha", "text": "T02 has the down main to J5, hold westbounds at J4"}],
   "network_status": {"arrived": 7, "on_time": 6, "malfunctions": 11,
-                     "jam": ["T09", "T21"], "deadlock": [], "deadlock_cells": []}
+                     "jam": ["T09", "T21"], "deadlock": [], "deadlock_cells": []},
+  "your_notes": "T13 via S3 so T02 keeps the main; release T15 after T02 clears J2"
 }
 ```
 

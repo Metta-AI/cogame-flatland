@@ -530,6 +530,10 @@ proc seatObservation*(sim: SimServer, seat, turnIndex, turns: int): JsonNode =
   ## occupancy are PUBLIC; intentions are PRIVATE. No other seat's targets,
   ## routes, orders, notes, real name or policy kind is in here, and nothing
   ## about any seat's identity ever reaches a prompt.
+  ##
+  ## `your_notes` is THIS seat's own note from last turn and nobody else's; it
+  ## is the one field `directiveRecord` strips before mirroring the
+  ## observation into the replay (design note §Decisions).
   var stations = newJArray()
   for ch in StationLetters:
     stations.add(%($ch))
@@ -640,7 +644,9 @@ proc seatObservation*(sim: SimServer, seat, turnIndex, turns: int): JsonNode =
       "jam": jam,
       "deadlock": deadlockList,
       "deadlock_cells": deadlockCells
-    }
+    },
+    "your_notes": (if seat >= 0 and seat < sim.seats.len:
+                     sim.seats[seat].notes else: "")
   }
 
 proc junctionGraphJson*(sim: SimServer): JsonNode =

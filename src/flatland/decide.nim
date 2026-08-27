@@ -101,15 +101,22 @@ proc registerRecord*(seat: int, alias, policy, kind, baseline: string): string =
 
 proc directiveRecord*(game: SimServer, turn, seat: int, directive: Directive,
                       view: JsonNode): string =
+  ## The replay's per-decision record. `view` is mirrored MINUS `your_notes`:
+  ## the note is private to the seat, and a spectator holding the bytes must
+  ## not be able to read it (design note §Decisions). The observation itself
+  ## is left untouched — the strip works on a copy.
   var ids: seq[string]
   for i in game.seatTrains(seat):
     ids.add(trainId(i))
+  var mirrored = copy(view)
+  if mirrored.kind == JObject and mirrored.hasKey("your_notes"):
+    mirrored.delete("your_notes")
   $(%*{
     "k": "directive", "turn": turn, "slot": seat, "alias": seatAlias(seat),
     "source": $directive.source, "latency_ms": directive.latencyMs,
     "orders": directive.serialise(ids),
     "say": directive.say.truncateRunes(MaxSayRunes),
-    "view": view
+    "view": mirrored
   })
 
 proc budgetGuardRecord(turn, remainingSeconds: int): string =
