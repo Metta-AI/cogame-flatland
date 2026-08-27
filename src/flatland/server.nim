@@ -59,7 +59,6 @@ type
     role: SocketRole
     slot: int
     viewer: GlobalViewerState
-    pendingRegistration: string
 
   AppState = object
     lock: Lock
@@ -175,11 +174,15 @@ proc websocketHandler(websocket: WebSocket, event: WebSocketEvent,
             if parsed.kind != SpriteClientChatMessage:
               continue
             let text = parsed.text.strip()
-            if text.len > 0 and text[0] == '{':
-              if state.slot >= 0:
-                appState.registrations[state.slot] = text
-              else:
-                state.pendingRegistration = text
+            ## HELD until the slot lands: `readRegistrations` re-reads this
+            ## table on every loop iteration and only stops applying a slot
+            ## once that seat is marked registered (the paintball 2026-08-25
+            ## slot-sequential-join scar). A socket that upgraded without
+            ## `?slot=` has nothing to hold FOR — the registration blob carries
+            ## no slot of its own and the socket can never learn one — so it is
+            ## dropped rather than parked in a field nothing reads.
+            if text.len > 0 and text[0] == '{' and state.slot >= 0:
+              appState.registrations[state.slot] = text
         else:
           state.viewer.applyGlobalViewerMessage(message.data)
           if state.viewer.replaySeekTick >= 0:
