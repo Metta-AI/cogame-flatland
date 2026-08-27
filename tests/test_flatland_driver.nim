@@ -3,6 +3,8 @@
 
 import std/[json, strutils, unicode]
 
+import curly
+
 import flatland/[sim, directives, baselines, decide, llm]
 import ./helpers
 
@@ -257,6 +259,41 @@ check "every seat is sent the tile grid and the junction graph, both pools":
       "the ASCII grid must survive into the user message verbatim"
     doAssert message.find("THE NETWORK") < message.find("operator guidance")
     doAssert message.find("operator guidance") < message.find("{\"you\"")
+
+# 23c. the 4096-BYTE read cap -------------------------------------------------
+check "the 4096-byte reply cap holds and never lands invalid UTF-8 in a record":
+  # `MaxReplyBytes` is the ONE deliberate byte-index slice on the path to the
+  # replay (design note §Decisions: the cap is defined in BYTES). Nothing
+  # asserted it, and nothing asserted that a cut landing mid-codepoint cannot
+  # walk into `fallback.detail`, which `truncateRunes` can only SHORTEN — it
+  # cannot repair a half-written rune.
+  var capConfig = defaultGameConfig()
+  capConfig.seed = 8
+  let capGame = newSimServer(capConfig)
+  capGame.startPlaying()
+  let capCtx = capGame.testContext(0)
+  let client = newLlmClient(capConfig)
+  var reply = "{\"say\":\"x"            ## 9 bytes, so 4096 - 9 = 4087 is not
+  while reply.len < MaxReplyBytes + 64:  ## a multiple of 4: the cap lands
+    reply.add("\u{1F682}")               ## INSIDE a 4-byte emoji
+  doAssert reply.validateUtf8() == -1
+  let body = $(%*{"content": [{"type": "text", "text": reply}]})
+  let cut = client.textOf(Response(code: 200, body: body), "", "https://x")
+  doAssert cut.len == MaxReplyBytes, "the cap is " & $MaxReplyBytes &
+    " BYTES, got " & $cut.len
+  doAssert cut.validateUtf8() >= 0,
+    "this fixture is only meaningful if the cut really did split a codepoint"
+  var detail = ""
+  try:
+    discard parseDirective(extractJsonObject(cut), capCtx)
+    doAssert false, "a cut-off object must not parse"
+  except CatchableError as error:
+    detail = error.msg
+  doAssert detail.len > 0
+  doAssert detail.validateUtf8() == -1,
+    "the captured error text is not valid UTF-8"
+  doAssert detail.truncateRunes(MaxFallbackDetailRunes).validateUtf8() == -1,
+    "fallback.detail would carry a half-written codepoint into the replay"
 
 # 24. the baseline tuning is the swept pick ----------------------------------
 check "the shipped baseline parameters are the swept pick":

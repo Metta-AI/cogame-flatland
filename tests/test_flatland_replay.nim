@@ -75,35 +75,69 @@ check "record -> re-derive matches at every tick, for every end reason":
     doAssert runtime.player.hashMismatchTick == -1
     doAssert runtime.sim.tick == game.tick
     doAssert runtime.sim.arrivedTotal == game.arrivedTotal
-  # allArrived / quiescent are reached by the sim itself; assert both are
-  # producible and re-derivable.
+  # quiescent is reached through RECORDED ORDERS, so it re-derives like the
+  # rest: every seat holds every train, nothing departs, and `quietTicks` runs
+  # up to `quiesceTicks`. (The old block forced `earliestDeparture` on the live
+  # world, which playback rebuilds from the config and therefore could never
+  # reproduce; it recorded hashes and never called `rederive`.)
   block quiescent:
     var config = defaultGameConfig()
     config.seed = 3
+    config.maxTicks = 96
     config.quiesceTicks = 8
     let game = newSimServer(config)
     var writer = initReplayWriter(config.resolvedConfigJson(game.network))
+    for slot in 0 ..< game.seatCount():
+      game.seats[slot].name = "policy-" & $slot
+      writer.writeJoin(slot, game.seats[slot].name, "")
     game.startPlaying()
-    for i in 0 ..< game.trains.len:
-      game.trains[i].earliestDeparture = 100000
     while game.phase == Playing:
+      if game.tick mod config.turnTicks == 0:
+        let turn = (game.tick div config.turnTicks) + 1
+        for seat in 0 ..< 4:
+          var orders: seq[ReplayOrder]
+          for i in game.seatTrains(seat):
+            game.applyOrder(i, TrainOrder(verb: ovHold))
+            orders.add(ReplayOrder(train: i, verb: ovHold, arg: ""))
+          writer.writeOrders(turn, seat, orders)
       game.step()
       writer.writeHash(game.tick, game.gameHash())
-    doAssert game.endRule == erQuiescent
+    doAssert game.endRule == erQuiescent,
+      "an all-hold episode must quiesce, got " & $game.endRule
+    doAssert game.tick == config.quiesceTicks
     writer.writeChat(resultRecord(game.networkResultsJson()))
     let bytes = writer.finish()
-    let replay = parseReplayBytes(bytes)
-    doAssert replay.resultDocument(){"endRule"}.getStr() == "quiescent"
+    doAssert parseReplayBytes(bytes).resultDocument(){"endRule"}.getStr() ==
+      "quiescent"
+    let runtime = rederive(bytes)
+    doAssert runtime.sim.endRule == erQuiescent,
+      "the re-derived episode ended on " & $runtime.sim.endRule
+    doAssert runtime.sim.tick == game.tick
+    doAssert runtime.player.hashMismatchTick == -1,
+      "hash mismatch at tick " & $runtime.player.hashMismatchTick &
+      " on a quiescent episode"
   block allArrived:
-    var config = defaultGameConfig()
-    config.seed = 3
-    let game = newSimServer(config)
-    game.startPlaying()
-    for i in 0 ..< game.trains.len:
-      game.trains[i].state = tsArrived
-      game.trains[i].cell = -1
-    game.step()
-    doAssert game.endRule == erAllArrived and game.reason == reComplete
+    # allArrived is NOT reachable through recorded orders: it needs all
+    # twenty-four trains home, and scripted play strands some of them in a
+    # permanent deadlock long before that (test_flatland_sim asserts exactly
+    # that). What is asserted here is the property re-derivation rests on —
+    # the rule fires from sim state alone, and two independent constructions
+    # of the same state agree bit for bit.
+    proc arrivedWorld(): SimServer =
+      var config = defaultGameConfig()
+      config.seed = 3
+      result = newSimServer(config)
+      result.startPlaying()
+      for i in 0 ..< result.trains.len:
+        result.trains[i].state = tsArrived
+        result.trains[i].cell = -1
+      result.step()
+    let a = arrivedWorld()
+    let b = arrivedWorld()
+    doAssert a.endRule == erAllArrived and a.reason == reComplete
+    doAssert a.tick == b.tick
+    doAssert a.gameHash() == b.gameHash()
+    doAssert a.hashes == b.hashes
   # wallClock and fault are LOAD-BEARING records
   for rule in [erWallClock, erFault]:
     let (bytes, game) = record(202, kinds, 200, rule, stopAt = 96)

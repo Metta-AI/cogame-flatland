@@ -381,6 +381,60 @@ check "deadlockCells names the cells the cycle is fighting over":
   let seen = game.seatObservation(0, 1, 31){"network_status"}{"deadlock_cells"}
   doAssert seen.len == 2
 
+check "jam raises at exactly jamTicks, a cycle at exactly deadlockTicks":
+  let game = emptyBoard()
+  let run = game.straightRun()
+  let cells = game.map.edges[game.map.edgeOf[run.cell]].cells
+  doAssert cells.len >= 3
+  game.placeTrain(0, cells[1], game.map.edgeFwd[cells[1]])
+  game.placeTrain(1, cells[2], opposite(game.map.edgeFwd[cells[2]]))
+  for i in 0 .. 1:
+    game.trains[i].order = TrainOrder(verb: ovRun)
+  game.trains[0].route = @[cells[2]]
+  game.trains[1].route = @[cells[1]]
+  let
+    jamAt = game.config.jamTicks
+    deadAt = game.config.deadlockTicks
+  doAssert jamAt == 12 and deadAt == 24
+  for tick in 1 .. deadAt + 16:
+    game.step()
+    if tick < jamAt:
+      doAssert game.activeJam.len == 0, "a jam raised at tick " & $tick
+    else:
+      doAssert game.activeJam == @[0, 1], "no jam at tick " & $tick
+    if tick < deadAt:
+      doAssert game.activeDeadlock.len == 0, "a deadlock raised at tick " & $tick
+    else:
+      doAssert game.activeDeadlock == @[0, 1], "no deadlock at tick " & $tick
+  doAssert game.jams == 1 and game.deadlocks == 1, "raised once, not per tick"
+  # both members are named in the event the analysis stream carries
+  var named: seq[int]
+  for event in game.events:
+    if event.kind == Deadlock:
+      named = event.trains
+  doAssert named == @[0, 1], "the Deadlock event must name both members"
+  # a re-route (here: one member held) is the only thing that breaks it
+  game.applyOrder(1, TrainOrder(verb: ovHold))
+  game.step()
+  doAssert game.activeDeadlock.len == 0, "holding a member must break the cycle"
+  var cleared = false
+  for event in game.events:
+    if event.kind == DeadlockClear:
+      cleared = true
+  doAssert cleared, "breaking a deadlock must emit deadlockclear"
+
+check "an unbroken deadlock is permanent and strands its members":
+  let game = playScripted(42, [blTimetable, blTimetable, blTimetable,
+                               blTimetable])
+  doAssert game.deadlocks > 0
+  doAssert game.terminalDeadlock,
+    "a deadlock nobody broke must still be there when the episode ends"
+  doAssert game.stranded > 0, "its members must be recorded as stranded"
+  for i, train in game.trains:
+    if train.stranded:
+      doAssert train.state != tsArrived
+      doAssert i in game.activeDeadlock
+
 # 12. scoring ----------------------------------------------------------------
 check "scoring: the formula, the sign and the lexicographic bound":
   var rng = initRng(7)
@@ -513,15 +567,28 @@ check "the network is pool[seed mod 3] and nothing a seat does changes the draw"
     let names = poolNames("mainline")
     doAssert networkForSeed("mainline", seed) == names[int(seed mod 3)]
   proc drawOf(kinds: array[4, Baseline]): seq[(int, int, int, int, int)] =
-    var config = defaultGameConfig()
-    config.seed = 17
-    let game = newSimServer(config)
-    for i, train in game.trains:
+    ## PLAY a whole episode with these four policies, then read the draw back
+    ## off the finished world. (The old form of this proc never touched
+    ## `kinds`: it built the same `defaultGameConfig()` world twice and
+    ## compared two identical constructions, so the anti-collusion claim it is
+    ## labelled with was not exercised at all.)
+    let game = playScripted(17, kinds, maxTicks = 160)
+    doAssert game.tick > 0
+    for train in game.trains:
       result.add((train.startCell, int(train.startHeading), train.target,
                   train.ticksPerCell, train.earliestDeparture))
   let a = drawOf([blYielder, blYielder, blYielder, blYielder])
   let b = drawOf([blTimetable, blTimetable, blTimetable, blTimetable])
   doAssert a == b, "the reset draw must not depend on seat behaviour"
+  # ... and it is still the draw the untouched world had before tick 1
+  var config = defaultGameConfig()
+  config.seed = 17
+  let fresh = newSimServer(config)
+  var initial: seq[(int, int, int, int, int)]
+  for train in fresh.trains:
+    initial.add((train.startCell, int(train.startHeading), train.target,
+                 train.ticksPerCell, train.earliestDeparture))
+  doAssert a == initial, "playing the episode moved the reset draw"
 
 check "start platforms are distinct, targets are reachable and long enough":
   var config = defaultGameConfig()

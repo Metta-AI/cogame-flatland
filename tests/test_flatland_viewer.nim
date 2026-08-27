@@ -38,7 +38,20 @@ check "the page is the starter's page plus an appended block, and only grows":
   doAssert marker in page
   let splice = page.find(marker)
   let inherited = page[0 ..< splice]
-  doAssert "window.ChromeCommon" notin inherited or true
+  # The inherited page CONSUMES chrome_common.js and broadcast_core.js through
+  # splice markers; it never carries a copy of either. (The old form of this
+  # assertion was `... notin inherited or true`, which is true for every
+  # possible page.)
+  for marker in ["<!-- WIRE_CONSTANTS -->", "<!-- CHROME_COMMON -->",
+                 "<!-- BROADCAST_CORE -->"]:
+    doAssert marker in inherited,
+      "the splice marker " & marker & " is gone; server.nim substitutes it"
+  doAssert "window.ChromeCommon({" in inherited,
+    "the page must CALL window.ChromeCommon, not define it"
+  doAssert "window.ChromeCommon = function" notin page,
+    "chrome_common.js is spliced in at serve time, never pasted into the page"
+  doAssert "function BroadcastCore(config)" notin page,
+    "broadcast_core.js is spliced in at serve time, never pasted into the page"
   doAssert page.endsWith(gameBlock), "the game block is APPENDED, never interleaved"
   doAssert inherited.len > 100_000,
     "the inherited chrome is the starter's whole classic page"
