@@ -39,6 +39,16 @@
   the measured geometry, so `viewer_smoke.mjs --strict-text-bounds` has real
   draws to gate on: a run that does not fit its box is drawn outside the
   canvas and the smoke fails.
+
+  IT ASSERTS ITS OWN STRINGS ARE STILL FULL LENGTH, twice over (acceptance
+  checklist item 15 - "one quietly shortened remark leaves it passing while
+  testing nothing"):
+
+    * every remark it generates is measured at exactly MaxSayRunes runes
+      before a single frame is fed, and a short one sets `data-replay-error`;
+    * every transcribed run is searched for a WHOLE remark, and at least one
+      per width must be found, so a feed that silently drops half of a radio
+      call fails even though the box it drew fitted perfectly.
 -->
 <div id="frames"></div>
 <canvas id="probe" width="1280" height="240"></canvas>
@@ -50,6 +60,7 @@
   var WIDTHS = [360, 640, 1024];
   var CAP_SAY = 120;
   var report = document.getElementById('report');
+  var fail = null;
 
   function say(seat) {
     // Exactly MaxSayRunes runes, so the feed row is at its cap.
@@ -60,8 +71,21 @@
     return Array.from(out).slice(0, CAP_SAY).join('');
   }
 
+  // THE FIXTURE ASSERTS ITS OWN STRINGS ARE STILL FULL LENGTH (acceptance
+  // checklist item 15). One quietly shortened remark would otherwise leave
+  // every gate below green while testing nothing.
+  var SEATS = ['Alpha', 'Beta', 'Gamma', 'Delta'];
+  var SAYS = SEATS.map(say);
+  SAYS.forEach(function (text, i) {
+    var runes = Array.from(text).length;
+    if (runes !== CAP_SAY) {
+      fail = 'the fixture remark for ' + SEATS[i] + ' is ' + runes +
+        ' runes, not the ' + CAP_SAY + '-rune cap it is supposed to be';
+    }
+  });
+
   function frame(tick) {
-    var seats = ['Alpha', 'Beta', 'Gamma', 'Delta'];
+    var seats = SEATS;
     var teams = {};
     var roster = [];
     var colours = ['red', 'blue', 'green', 'yellow'];
@@ -81,7 +105,6 @@
     }
     var events = [];
     for (var s = 0; s < 4; s++) {
-      events.push({ k: 'say', slot: s, text: say(seats[s]) });
       events.push({ k: 'order', slot: s, train: 'T0' + (s + 1), verb: 'siding', arg: 'S3' });
     }
     events.push({ k: 'malfunction', train: 'T14', cell: [19, 9], duration: 21 });
@@ -91,6 +114,15 @@
     events.push({ k: 'deadlock', trains: ['T09', 'T21', 'T13', 'T18'],
                   cells: [[9, 6], [15, 6], [21, 6], [15, 2]], tick: tick });
     events.push({ k: 'fallback', slot: 3, cause: 'timeout' });
+    // The four FULL-CAP remarks go LAST. The inherited chrome's MAX_FEED is 4,
+    // and pushFeed inserts at the head and trims the tail, so only the last
+    // four rows pushed are still on screen when transcribe() runs. With the
+    // says pushed first they were evicted by the order/malfunction/arrive rows
+    // before anything measured them - the fixture's whole worst case never
+    // reached the page.
+    for (var t = 0; t < 4; t++) {
+      events.push({ k: 'say', slot: t, text: SAYS[t] });
+    }
     return {
       t: tick, mt: 496, ph: 'playing', lob: 0, pl: true, sp: 1, mx: 496, st: 0,
       lp: false, sk: false, ff: false, en: true, mm: -1, bs: 1, pov: -1,
@@ -121,7 +153,14 @@
   var SHIM = [
     '<script>',
     '(function(){',
-    '  var TICKS = [16, 120, 240, 400];',
+    // The tick must ADVANCE BY A SMALL STRIDE. The inherited page treats
+    // `s.t < lastTick`, or a jump of more than `stride * 4 + 2`, as a SEEK: it
+    // calls clearFeed() and skips applyEvent entirely for that frame. Cycling
+    // 16 -> 120 -> 240 -> 400 -> 16 made every frame a seek, so no event this
+    // fixture feeds ever reached the feed and `#killfeed .feed-row` matched
+    // nothing at any width - the radio path it exists to exercise was never
+    // drawn once.
+    '  var TICK = 396;',
     '  window.FlatlandStaticReplay = {',
     '    createCore: function (config) {',
     '      var i = 0;',
@@ -130,7 +169,7 @@
     '          config.onStatus && config.onStatus("open");',
     '          config.onFirstFrame && config.onFirstFrame();',
     '          var pump = function () {',
-    '            config.onText(JSON.stringify(window.__FL_FRAME(TICKS[i % TICKS.length])));',
+    '            config.onText(JSON.stringify(window.__FL_FRAME(TICK + i * 4)));',
     '            i += 1;',
     '            document.documentElement.setAttribute("data-replay-loaded", "true");',
     '            if (i < 12) setTimeout(pump, 120);',
@@ -179,6 +218,7 @@
     var doc = frameEl.contentDocument;
     var runs = 0;
     var overflow = 0;
+    var full = 0;
     var nodes = doc.querySelectorAll(
       '#ontime-rail .rail-row span, #killfeed .feed-row, #scorebug .plate-name, ' +
       '#alarm-chip span, #clock-time, #clock-caption, .banner-chip');
@@ -207,13 +247,25 @@
       ctx.fillText(text, x, y);
       runs += 1;
       if (clipped) overflow += 1;
+      // ...and the run the page laid out still carries the WHOLE remark. A
+      // feed row that silently dropped half of a 120-rune radio call would
+      // otherwise measure and draw perfectly.
+      for (var k = 0; k < SAYS.length; k++) {
+        if (text.indexOf(SAYS[k]) >= 0) { full += 1; break; }
+      }
     }
-    return { runs: runs, overflow: overflow };
+    return { runs: runs, overflow: overflow, full: full };
+  }
+
+  if (fail) {
+    document.documentElement.setAttribute('data-replay-error', fail);
+    report.textContent = 'renderer fixture failed: ' + fail;
+    return;
   }
 
   fetch('./index.html').then(function (res) { return res.text(); }).then(function (html) {
     var ctx = document.getElementById('probe').getContext('2d');
-    var totals = { runs: 0, overflow: 0, widths: [] };
+    var totals = { runs: 0, overflow: 0, full: 0, widths: [] };
     var chain = Promise.resolve();
     WIDTHS.forEach(function (width) {
       chain = chain.then(function () {
@@ -221,18 +273,28 @@
           var got = transcribe(frameEl, ctx);
           totals.runs += got.runs;
           totals.overflow += got.overflow;
-          totals.widths.push(width + ':' + got.runs + ' runs, ' + got.overflow + ' clipped');
+          totals.full += got.full;
+          totals.widths.push(width + ':' + got.runs + ' runs, ' + got.overflow +
+            ' clipped, ' + got.full + ' full-cap remarks');
           return null;
         });
       });
     });
     return chain.then(function () {
       report.textContent = 'renderer fixture: ' + totals.runs +
-        ' text runs transcribed, ' + totals.overflow + ' clipped\n' +
+        ' text runs transcribed, ' + totals.overflow + ' clipped, ' +
+        totals.full + ' carried a full ' + CAP_SAY + '-rune remark\n' +
         totals.widths.join('\n');
       if (totals.runs === 0) {
         document.documentElement.setAttribute(
           'data-replay-error', 'the shipped page laid out no text at any width');
+        return;
+      }
+      if (totals.full < WIDTHS.length) {
+        document.documentElement.setAttribute('data-replay-error',
+          'only ' + totals.full + ' laid-out run(s) carried a whole ' +
+          CAP_SAY + '-rune remark; expected at least one at each of ' +
+          WIDTHS.length + ' widths');
         return;
       }
       document.documentElement.setAttribute('data-replay-loaded', 'true');
