@@ -130,6 +130,162 @@ def cut_css_rules(text, selectors):
     return head + "".join(out) + tail
 
 
+
+# The zoom gestures, cut from the starter verbatim. Kept as data next to the
+# re-labelling table so the diff against the starter stays readable.
+ZOOM_GESTURE_CUTS = [
+    # the ?viewpanel=0 opt-out: there is no #viewpanel to opt out of
+    ("""  // ?viewpanel=0 hides the #viewpanel overlay (zoom bar + minimap). This is an
+  // explicit opt-OUT only \u2014 the default (param absent) is unchanged for every
+  // existing embed, so the League Replayer still shows zoom + minimap. See the
+  // #271/#272 lesson: hiding the panel for ALL embeds broke the Replayer shell.
+  // Billboards (Lobby hero) and thumbnail capture append &viewpanel=0.
+  try {
+    if (new URLSearchParams(location.search).get('viewpanel') === '0')
+      document.body.setAttribute('data-noviewpanel', '1');
+  } catch (e) {}
+
+""", ""),
+    # the section header now describes pan only
+    ("""  // ---- zoom + pan -------------------------------------------------------
+  // A generated board can be 4992px square; letterboxed whole into a ~760px
+  // stage that is 0.15x, where a cog is a single pixel. So the board has to be
+  // enterable \u2014 but NOT by scrolling. A trackpad two-finger scroll and a mouse
+  // wheel are how you move the PAGE, and a viewer that eats them zooms the
+  // board every time someone tries to scroll past it. The gestures that mean
+  // "zoom" and nothing else are: pinch (trackpad and touchscreen), the +/-
+  // buttons and slider, and the z/x keys. Drag pans, arrows nudge, double-click
+  // (or 0, or the slider at rest) refits.
+  // The transform lives in broadcast_core, so click-to-select below inverts the
+  // SAME numbers and keeps hitting what you actually clicked at any zoom.
+""",
+     """  // ---- pan ----------------------------------------------------------------
+  // FLATLAND: the board is a fixed 28x14 grid that fits the frame at every
+  // width, so there is nothing to zoom INTO. The zoom cluster, the minimap and
+  // every zoom gesture the starter carried \u2014 ctrl+wheel, the Safari gesture
+  // events, the touchscreen pinch and the z/x keys \u2014 are removed with
+  // #viewpanel rather than hidden. Drag pans, arrows nudge, double-click refits.
+  // The transform lives in broadcast_core, so click-to-select below inverts the
+  // SAME numbers and keeps hitting what you actually clicked.
+"""),
+    # canvasPoint + the ctrl+wheel zoom + the Safari gesture zoom
+    ("""  function canvasPoint(ev) {
+    var rect = canvas.getBoundingClientRect();
+    return { x: ev.clientX - rect.left, y: ev.clientY - rect.top, ok: rect.width > 0 };
+  }
+
+  // A trackpad PINCH reaches a browser as a wheel event with ctrlKey set (no
+  // ctrl key is actually held) \u2014 that, and only that, is the wheel we take.
+  // Everything else falls through to the page exactly as if the board were an
+  // image. preventDefault on this one also suppresses the browser's own
+  // ctrl+wheel page zoom, which would otherwise fight the board zoom.
+  var gesturing = false, gestureZoom = 1, gestureAt = null;
+  canvas.addEventListener('wheel', function (ev) {
+    if (!ev.ctrlKey || gesturing) return;
+    ev.preventDefault();
+    var p = canvasPoint(ev);
+    if (!p.ok) return;
+    var unit = ev.deltaMode === 1 ? 16 : (ev.deltaMode === 2 ? 100 : 1);
+    core.zoomAt(Math.exp(-ev.deltaY * unit * 0.012), p.x, p.y);
+  }, { passive: false });
+
+  // Safari reports the same trackpad pinch as gesture events instead, with an
+  // absolute scale factor from the gesture's start; `gesturing` keeps the two
+  // paths from both firing on browsers that send both.
+  canvas.addEventListener('gesturestart', function (ev) {
+    ev.preventDefault();
+    gesturing = true;
+    var t = core.getTransform();
+    gestureZoom = (t && t.zoom) || 1;
+    gestureAt = canvasPoint(ev);
+  });
+  canvas.addEventListener('gesturechange', function (ev) {
+    ev.preventDefault();
+    if (!gesturing || !(ev.scale > 0)) return;
+    var a = gestureAt && gestureAt.ok ? gestureAt : null;
+    core.setZoom(gestureZoom * ev.scale, a ? a.x : undefined, a ? a.y : undefined);
+  });
+  canvas.addEventListener('gestureend', function (ev) {
+    ev.preventDefault();
+    gesturing = false;
+  });
+
+  // Touchscreen pinch. #board's touch-action leaves one-finger panning to the
+  // page while it is fitted (so the board never traps a scroll) and takes it
+  // back once zoomed in, where a drag has somewhere to go; pinch-zoom is never
+  // in that list, so a second finger always arrives here as a pointer.
+  var pinch = new Map();          // pointerId -> {x, y}
+  var pinchSpan = 0, pinchMidX = 0, pinchMidY = 0;
+  function pinchGeometry() {
+    var pts = Array.from(pinch.values());
+    var dx = pts[0].x - pts[1].x, dy = pts[0].y - pts[1].y;
+    return {
+      span: Math.max(1, Math.hypot(dx, dy)),
+      midX: (pts[0].x + pts[1].x) / 2,
+      midY: (pts[0].y + pts[1].y) / 2
+    };
+  }
+  function beginPinch() {
+    var g = pinchGeometry();
+    pinchSpan = g.span;
+    pinchMidX = g.midX;
+    pinchMidY = g.midY;
+    dragging = false;             // two fingers is a pinch, not a drag
+  }
+
+  function syncTouchAction(t) {
+    // Fitted: the page owns one-finger drags. Zoomed: the board does.
+    canvas.style.touchAction = (t && t.zoom > 1) ? 'none' : 'pan-x pan-y';
+  }
+
+""", ""),
+    # a second finger is no longer a pinch, so pointerdown is drag-only
+    ("""  canvas.addEventListener('pointerdown', function (ev) {
+    if (ev.pointerType === 'touch') {
+      pinch.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
+      if (pinch.size === 2) { beginPinch(); return; }
+      if (pinch.size > 2) return;
+    }
+    if (ev.button !== 0) return;
+""",
+     """  canvas.addEventListener('pointerdown', function (ev) {
+    if (ev.button !== 0) return;
+"""),
+    ("""  window.addEventListener('pointermove', function (ev) {
+    if (pinch.has(ev.pointerId)) {
+      pinch.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
+      if (pinch.size === 2) {
+        var g = pinchGeometry();
+        var rect = canvas.getBoundingClientRect();
+        // Zoom by how much the fingers spread, then pan by how far the pair
+        // travelled, so the board tracks the hand instead of only the spread.
+        core.zoomAt(g.span / pinchSpan, g.midX - rect.left, g.midY - rect.top);
+        core.panBy(g.midX - pinchMidX, g.midY - pinchMidY);
+        pinchSpan = g.span;
+        pinchMidX = g.midX;
+        pinchMidY = g.midY;
+        dragMoved = 999;          // a pinch must never also select a cog
+        return;
+      }
+    }
+    if (!dragging) return;
+""",
+     """  window.addEventListener('pointermove', function (ev) {
+    if (!dragging) return;
+"""),
+    ("""  function endPointer(ev) {
+    if (ev && pinch.has(ev.pointerId)) {
+      pinch.delete(ev.pointerId);
+      if (pinch.size === 2) beginPinch();
+    }
+    dragging = false;
+""",
+     """  function endPointer() {
+    dragging = false;
+"""),
+]
+
+
 def starter_available() -> bool:
     return os.path.exists(os.path.join(STARTER, "client", "replay_broadcast.html"))
 
@@ -197,6 +353,18 @@ def build() -> str:
         "    onTransform: function () { }")
     page = page.replace(
         "    if (!dragging) canvas.style.cursor = 'grab';\n", "")
+
+    # ---- script: the zoom GESTURES go with the panel -----------------------
+    # Acceptance checklist item 14, bullet 4: a game whose whole arena fits the
+    # frame removes the panel -- markup, CSS, the core.zoomAt/setZoom/
+    # attachMinimap wiring, and the ids -- rather than hiding it. The board is a
+    # fixed 28x14 grid, so the ctrl-wheel, the Safari gesture events, the
+    # touchscreen pinch and the ?viewpanel=0 opt-out that hid a panel which no
+    # longer exists all go with it. Drag still pans; double-click still refits.
+    for before, after in ZOOM_GESTURE_CUTS:
+        if before not in page:
+            raise SystemExit(f"zoom-gesture anchor not found: {before[:70]!r}")
+        page = page.replace(before, after, 1)
 
     # ---- CSS: the removed elements and the never-emitted beat kinds --------
     page = cut_css_rules(page, [

@@ -1481,16 +1481,6 @@ body[data-embed] #board { top: 0; height: 100%; }
   try { EMBED = new URLSearchParams(location.search).get('embed') === '1'; } catch (e) {}
   if (EMBED) document.body.setAttribute('data-embed', '1');
 
-  // ?viewpanel=0 hides the #viewpanel overlay (zoom bar + minimap). This is an
-  // explicit opt-OUT only — the default (param absent) is unchanged for every
-  // existing embed, so the League Replayer still shows zoom + minimap. See the
-  // #271/#272 lesson: hiding the panel for ALL embeds broke the Replayer shell.
-  // Billboards (Lobby hero) and thumbnail capture append &viewpanel=0.
-  try {
-    if (new URLSearchParams(location.search).get('viewpanel') === '0')
-      document.body.setAttribute('data-noviewpanel', '1');
-  } catch (e) {}
-
   // Tick deep-link (?t=<tick>): seek there on load, paused, via the same s:
   // command the scrubber uses (the sim clamps out-of-range ticks). One-shot,
   // fired on the first ingested frame so the replay runtime is ready.
@@ -2450,93 +2440,16 @@ body[data-embed] #board { top: 0; height: 100%; }
   // HTML overlays, so a canvas click is always a MAP-space click. Invert the
   // core's letterbox transform to recover native map pixels, then hand them to
   // clickMap — the server hit-tests the soldier footprint and toggles selection.
-  // ---- zoom + pan -------------------------------------------------------
-  // A generated board can be 4992px square; letterboxed whole into a ~760px
-  // stage that is 0.15x, where a cog is a single pixel. So the board has to be
-  // enterable — but NOT by scrolling. A trackpad two-finger scroll and a mouse
-  // wheel are how you move the PAGE, and a viewer that eats them zooms the
-  // board every time someone tries to scroll past it. The gestures that mean
-  // "zoom" and nothing else are: pinch (trackpad and touchscreen), the +/-
-  // buttons and slider, and the z/x keys. Drag pans, arrows nudge, double-click
-  // (or 0, or the slider at rest) refits.
+  // ---- pan ----------------------------------------------------------------
+  // FLATLAND: the board is a fixed 28x14 grid that fits the frame at every
+  // width, so there is nothing to zoom INTO. The zoom cluster, the minimap and
+  // every zoom gesture the starter carried — ctrl+wheel, the Safari gesture
+  // events, the touchscreen pinch and the z/x keys — are removed with
+  // #viewpanel rather than hidden. Drag pans, arrows nudge, double-click refits.
   // The transform lives in broadcast_core, so click-to-select below inverts the
-  // SAME numbers and keeps hitting what you actually clicked at any zoom.
+  // SAME numbers and keeps hitting what you actually clicked.
   var dragging = false, dragMoved = 0, lastDragX = 0, lastDragY = 0;
-  function canvasPoint(ev) {
-    var rect = canvas.getBoundingClientRect();
-    return { x: ev.clientX - rect.left, y: ev.clientY - rect.top, ok: rect.width > 0 };
-  }
-
-  // A trackpad PINCH reaches a browser as a wheel event with ctrlKey set (no
-  // ctrl key is actually held) — that, and only that, is the wheel we take.
-  // Everything else falls through to the page exactly as if the board were an
-  // image. preventDefault on this one also suppresses the browser's own
-  // ctrl+wheel page zoom, which would otherwise fight the board zoom.
-  var gesturing = false, gestureZoom = 1, gestureAt = null;
-  canvas.addEventListener('wheel', function (ev) {
-    if (!ev.ctrlKey || gesturing) return;
-    ev.preventDefault();
-    var p = canvasPoint(ev);
-    if (!p.ok) return;
-    var unit = ev.deltaMode === 1 ? 16 : (ev.deltaMode === 2 ? 100 : 1);
-    core.zoomAt(Math.exp(-ev.deltaY * unit * 0.012), p.x, p.y);
-  }, { passive: false });
-
-  // Safari reports the same trackpad pinch as gesture events instead, with an
-  // absolute scale factor from the gesture's start; `gesturing` keeps the two
-  // paths from both firing on browsers that send both.
-  canvas.addEventListener('gesturestart', function (ev) {
-    ev.preventDefault();
-    gesturing = true;
-    var t = core.getTransform();
-    gestureZoom = (t && t.zoom) || 1;
-    gestureAt = canvasPoint(ev);
-  });
-  canvas.addEventListener('gesturechange', function (ev) {
-    ev.preventDefault();
-    if (!gesturing || !(ev.scale > 0)) return;
-    var a = gestureAt && gestureAt.ok ? gestureAt : null;
-    core.setZoom(gestureZoom * ev.scale, a ? a.x : undefined, a ? a.y : undefined);
-  });
-  canvas.addEventListener('gestureend', function (ev) {
-    ev.preventDefault();
-    gesturing = false;
-  });
-
-  // Touchscreen pinch. #board's touch-action leaves one-finger panning to the
-  // page while it is fitted (so the board never traps a scroll) and takes it
-  // back once zoomed in, where a drag has somewhere to go; pinch-zoom is never
-  // in that list, so a second finger always arrives here as a pointer.
-  var pinch = new Map();          // pointerId -> {x, y}
-  var pinchSpan = 0, pinchMidX = 0, pinchMidY = 0;
-  function pinchGeometry() {
-    var pts = Array.from(pinch.values());
-    var dx = pts[0].x - pts[1].x, dy = pts[0].y - pts[1].y;
-    return {
-      span: Math.max(1, Math.hypot(dx, dy)),
-      midX: (pts[0].x + pts[1].x) / 2,
-      midY: (pts[0].y + pts[1].y) / 2
-    };
-  }
-  function beginPinch() {
-    var g = pinchGeometry();
-    pinchSpan = g.span;
-    pinchMidX = g.midX;
-    pinchMidY = g.midY;
-    dragging = false;             // two fingers is a pinch, not a drag
-  }
-
-  function syncTouchAction(t) {
-    // Fitted: the page owns one-finger drags. Zoomed: the board does.
-    canvas.style.touchAction = (t && t.zoom > 1) ? 'none' : 'pan-x pan-y';
-  }
-
   canvas.addEventListener('pointerdown', function (ev) {
-    if (ev.pointerType === 'touch') {
-      pinch.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
-      if (pinch.size === 2) { beginPinch(); return; }
-      if (pinch.size > 2) return;
-    }
     if (ev.button !== 0) return;
     dragging = true;
     dragMoved = 0;
@@ -2544,22 +2457,6 @@ body[data-embed] #board { top: 0; height: 100%; }
     lastDragY = ev.clientY;
   });
   window.addEventListener('pointermove', function (ev) {
-    if (pinch.has(ev.pointerId)) {
-      pinch.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
-      if (pinch.size === 2) {
-        var g = pinchGeometry();
-        var rect = canvas.getBoundingClientRect();
-        // Zoom by how much the fingers spread, then pan by how far the pair
-        // travelled, so the board tracks the hand instead of only the spread.
-        core.zoomAt(g.span / pinchSpan, g.midX - rect.left, g.midY - rect.top);
-        core.panBy(g.midX - pinchMidX, g.midY - pinchMidY);
-        pinchSpan = g.span;
-        pinchMidX = g.midX;
-        pinchMidY = g.midY;
-        dragMoved = 999;          // a pinch must never also select a cog
-        return;
-      }
-    }
     if (!dragging) return;
     var dx = ev.clientX - lastDragX, dy = ev.clientY - lastDragY;
     lastDragX = ev.clientX;
@@ -2569,11 +2466,7 @@ body[data-embed] #board { top: 0; height: 100%; }
     var t = core.getTransform();
     canvas.style.cursor = t && t.zoom > 1 ? 'grabbing' : '';
   });
-  function endPointer(ev) {
-    if (ev && pinch.has(ev.pointerId)) {
-      pinch.delete(ev.pointerId);
-      if (pinch.size === 2) beginPinch();
-    }
+  function endPointer() {
     dragging = false;
     canvas.style.cursor = '';
   }
