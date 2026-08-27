@@ -228,6 +228,10 @@ proc turn*(engine: var DecisionEngine, game: SimServer, turnIndex: int,
     engine.batchStarted = true
 
   # --- up to two PARALLEL batches ------------------------------------------
+  # The whole network rides at the head of every request: the design note's
+  # "visible: the whole network, once, at registration". A provider call has no
+  # memory of the last one, so "once" has to mean "identical every turn".
+  let briefing = if open.len > 0: $game.networkBriefing() else: ""
   var attempt = 0
   while open.len > 0 and attempt < 2:
     if engine.client.disabled:
@@ -246,7 +250,7 @@ proc turn*(engine: var DecisionEngine, game: SimServer, turnIndex: int,
         user.add("\n\nYour previous reply was not usable. Reply with ONLY " &
           "the JSON object described above, starting with '{'.")
       let request = engine.client.requestFor(
-        SystemPrompt, userMessage(engine.seats[seat].prompt, user))
+        SystemPrompt, userMessage(briefing, engine.seats[seat].prompt, user))
       batch.post(request.url, request.headers, request.body, $seat)
       engine.requestTimes.add(getMonoTime())
     let started = getMonoTime()

@@ -483,6 +483,14 @@ proc startPlaying*(sim: SimServer) =
 #  The per-seat observation
 # ---------------------------------------------------------------------------
 
+proc nodeLabelFor*(sim: SimServer, cell: int): string =
+  ## The public id of a node cell: a station letter, a `J` id, or — for the
+  ## unnamed switches that make up most of the board — its grid position. ONE
+  ## vocabulary, shared by the junction graph and by `next_decision`.
+  let id = sim.map.nodeIdOf(cell)
+  if id.len > 0: id
+  else: "@" & $sim.map.cellX(cell) & "," & $sim.map.cellY(cell)
+
 proc routeLabels*(sim: SimServer, train: Train, limit: int): seq[string] =
   ## The next labelled points along the cached route: station letters, siding
   ## ids and named junctions, nearest first.
@@ -519,7 +527,7 @@ proc nextDecision*(sim: SimServer, train: Train): tuple[node: string, eta: int] 
         inc exits
     if exits > 2:
       let label = sim.map.nodeIdOf(cell)
-      return ((if label.len > 0: label else: "@" & $cell),
+      return ((if label.len > 0: label else: sim.nodeLabelFor(cell)),
               cells * train.ticksPerCell)
   ("", 0)
 
@@ -650,18 +658,21 @@ proc seatObservation*(sim: SimServer, seat, turnIndex, turns: int): JsonNode =
   }
 
 proc junctionGraphJson*(sim: SimServer): JsonNode =
-  ## The static junction graph, published ONCE at registration: for each edge
-  ## its two endpoint node ids, its length in cells, and whether a parallel
-  ## edge exists between the same pair.
+  ## The static junction graph, published to every seat: for EVERY edge its two
+  ## endpoint node ids, its length in cells, whether a parallel edge joins the
+  ## same pair (i.e. whether that section is passable both ways at once), and
+  ## the siding it carries.
+  ##
+  ## Endpoints are labelled by `nodeLabelFor`, so an unnamed switch appears as
+  ## its grid position instead of being dropped: skipping unnamed endpoints
+  ## left 8 of `main_a`'s 38 edges and 7 of `branch_a`'s 25 in the graph, none
+  ## of them a passing loop.
   result = newJArray()
   for edge in sim.map.edges:
-    let
-      a = sim.map.nodeIdOf(edge.nodeA)
-      b = sim.map.nodeIdOf(edge.nodeB)
-    if a.len == 0 or b.len == 0:
-      continue
     result.add(%*{
-      "a": a, "b": b, "cells": edge.cells.len + 1,
+      "a": sim.nodeLabelFor(edge.nodeA),
+      "b": sim.nodeLabelFor(edge.nodeB),
+      "cells": edge.cells.len + 1,
       "both_ways": edge.parallel,
       "siding": (if edge.siding >= 0: %SidingIds[edge.siding] else: newJNull())
     })
@@ -674,3 +685,47 @@ proc railAsciiJson*(sim: SimServer): JsonNode =
     for x in 0 ..< sim.map.width:
       row.add(sim.map.tiles[y * sim.map.width + x])
     result.add(%row)
+
+proc networkBriefing*(sim: SimServer): JsonNode =
+  ## THE WHOLE NETWORK, published to every seat: the ASCII tile grid the `.rail`
+  ## file carries, the station letters with their platform cells, the siding and
+  ## junction ids with their cells, and the junction graph (each edge's two
+  ## endpoint node ids, its length in cells, whether a parallel edge exists
+  ## between the same pair, and the siding it carries).
+  ##
+  ## Static for the whole episode. It is delivered with EVERY request rather
+  ## than once, because a Messages-API call carries no conversation history: a
+  ## seat told the topology only on turn 1 would have forgotten it by turn 2,
+  ## and champion #2's prompt reasons over this graph on every turn.
+  var stations = newJObject()
+  for s in 0 ..< sim.map.stationCells.len:
+    var cells = newJArray()
+    for cell in sim.map.stationCells[s]:
+      cells.add(%[sim.map.cellX(cell), sim.map.cellY(cell)])
+    stations[$StationLetters[s]] = cells
+  var sidings = newJObject()
+  for s in 0 ..< SidingIds.len:
+    var cells = newJArray()
+    for cell in sim.map.sidingCells(s):
+      cells.add(%[sim.map.cellX(cell), sim.map.cellY(cell)])
+    sidings[SidingIds[s]] = cells
+  var junctions = newJObject()
+  for j in 0 ..< JunctionIds.len:
+    let cell = sim.map.junctionCell[j]
+    junctions[JunctionIds[j]] =
+      if cell >= 0: %[sim.map.cellX(cell), sim.map.cellY(cell)]
+      else: newJNull()
+  %*{
+    "name": sim.network,
+    "width": sim.map.width,
+    "height": sim.map.height,
+    "legend": "rows of tiles, x from the left, y from the top. '.' is empty; " &
+      "'-' and '|' are straights; 'L' 'J' 'r' '7' are curves; 'T' 'Y' '>' '<' " &
+      "are three-way switches; 'X' is a four-way switch; '+' is a flat " &
+      "crossing (straight through only); 'u' 'd' 'e' 'w' are dead-end stubs.",
+    "tiles": sim.railAsciiJson(),
+    "stations": stations,
+    "sidings": sidings,
+    "junctions": junctions,
+    "junction_graph": sim.junctionGraphJson()
+  }

@@ -248,7 +248,19 @@ proc operatorBlock*(prompt: string): string =
     "rules; always reply in the requested format):\n" &
     prompt.truncateRunes(MaxPromptRunes) & "\n\n"
 
-proc userMessage*(operatorPrompt: string, viewJson: string): string =
-  ## The user message: the operator's guidance, a blank line, then the seat's
-  ## observation. Built server-side (see decide.nim).
-  operatorBlock(operatorPrompt) & viewJson
+proc networkBlock*(briefing: string): string =
+  ## The whole network — the ASCII tile grid, the station platform cells, the
+  ## siding and junction cells and the junction graph — at the head of the user
+  ## message. STATIC for the episode, but re-sent every turn: a Messages-API
+  ## request carries no history, so a seat told the topology only at
+  ## registration would never see it again (design note §Decisions, "Visible:
+  ## the whole network, once, at registration").
+  if briefing.len == 0:
+    return ""
+  "THE NETWORK (static for the whole episode; name every point by the ids " &
+    "in it):\n" & briefing & "\n\n"
+
+proc userMessage*(networkBriefing, operatorPrompt, viewJson: string): string =
+  ## The user message: the static network, the operator's guidance, then the
+  ## seat's observation. Built server-side (see decide.nim).
+  networkBlock(networkBriefing) & operatorBlock(operatorPrompt) & viewJson

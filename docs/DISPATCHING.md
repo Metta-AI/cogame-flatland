@@ -31,12 +31,17 @@ and its orders are not.
 box sees where every train is; it does not see another box's timetable. That is what
 makes "yielding conventions without a central scheduler" the actual problem.
 
-Visible: the whole network once at registration (the ASCII tile grid, the station
-letters and their platform cells, the six siding ids, the nine junction ids and a
-junction graph); **full block occupancy every turn** (one line per train on the grid:
-id, owner alias, cell, heading, speed class, state, stalled ticks); everything about
-the seat's own trains; the network radio (every seat's `say` from the previous turn);
-and public network statistics.
+Visible: the whole network (the ASCII tile grid, the station letters with their
+platform cells, the six siding ids and cells, the nine junction ids and cells, and a
+junction graph giving every section's two endpoints, its length in cells, whether a
+parallel road makes it passable both ways at once, and the siding it carries) — static
+for the whole episode, and delivered at the head of **every** request, because a
+provider call carries no history and a seat told the topology only at registration
+would never see it again; **full block occupancy every turn** (one line per train on
+the grid: id, owner alias, cell, heading, speed class, state, stalled ticks);
+everything about the seat's own trains; the network radio (every seat's `say` from the
+previous turn); the seat's own `your_notes` from last turn; and public network
+statistics.
 
 Hidden: every other seat's trains' targets, scheduled arrivals, routes, orders and
 notes; every other seat's real name, policy name and kind; every train's future

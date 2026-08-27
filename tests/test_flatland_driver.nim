@@ -3,7 +3,7 @@
 
 import std/[json, strutils, unicode]
 
-import flatland/[sim, directives, baselines, decide]
+import flatland/[sim, directives, baselines, decide, llm]
 import ./helpers
 
 echo "test_flatland_driver"
@@ -213,6 +213,50 @@ check "tolerant JSON extraction survives fences and trailing prose":
   except DirectiveError:
     raised = true
   doAssert raised
+
+# 23b. the whole network reaches the seat ------------------------------------
+check "every seat is sent the tile grid and the junction graph, both pools":
+  for pool in ["mainline", "branchline"]:
+    var config = defaultGameConfig()
+    config.seed = 3
+    config.networkPool = pool
+    config.trainsPerSeat = if pool == "mainline": 6 else: 4
+    let game = newSimServer(config)
+    let briefing = game.networkBriefing()
+    doAssert briefing{"name"}.getStr() == game.network
+    doAssert briefing{"tiles"}.len == game.map.height
+    for row in briefing{"tiles"}:
+      doAssert row.getStr().len == game.map.width
+    doAssert briefing{"junction_graph"}.len > 0,
+      "the junction graph is empty on " & game.network
+    var sawBothWays = false
+    var sawSiding = false
+    for edge in briefing{"junction_graph"}:
+      doAssert edge{"a"}.getStr().len > 0 and edge{"b"}.getStr().len > 0
+      doAssert edge{"cells"}.getInt() > 0
+      if edge{"both_ways"}.getBool():
+        sawBothWays = true
+      if edge{"siding"}.kind == JString:
+        sawSiding = true
+    doAssert sawBothWays,
+      "the graph must say which sections are passable both ways at once"
+    doAssert sawSiding, "the graph must name the sidings it carries"
+    for id in SidingIds:
+      doAssert briefing{"sidings"}.hasKey(id), "no cells for siding " & id
+    for id in JunctionIds:
+      doAssert briefing{"junctions"}.hasKey(id), "no cell for junction " & id
+    for ch in StationLetters:
+      doAssert briefing{"stations"}{$ch}.len == 3,
+        "station " & $ch & " must publish its three platform cells"
+    # and it is at the head of the message the seat actually receives
+    let message = userMessage($briefing, "operator guidance",
+                              "{\"you\":\"Alpha\"}")
+    doAssert "THE NETWORK" in message
+    doAssert "junction_graph" in message
+    doAssert briefing{"tiles"}[1].getStr() in message,
+      "the ASCII grid must survive into the user message verbatim"
+    doAssert message.find("THE NETWORK") < message.find("operator guidance")
+    doAssert message.find("operator guidance") < message.find("{\"you\"")
 
 # 24. the baseline tuning is the swept pick ----------------------------------
 check "the shipped baseline parameters are the swept pick":
