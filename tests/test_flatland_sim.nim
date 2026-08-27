@@ -345,6 +345,42 @@ check "a real episode reaches a permanent deadlock and reports it":
   var report = parseJson(game.networkResultsJson())
   doAssert report{"deadlocks"}.getInt() == game.deadlocks
 
+check "deadlockCells names the cells the cycle is fighting over":
+  # A closed waits-for cycle: every member is refused the cell its successor is
+  # standing on, so the set of cells the cycle is fighting over IS the set of
+  # cells its members hold. Pinned here so "the members' own cells" can never
+  # drift away from "the contested cells" the note and the viewer promise.
+  let game = emptyBoard()
+  let run = game.straightRun()
+  let cells = game.map.edges[game.map.edgeOf[run.cell]].cells
+  doAssert cells.len >= 3
+  game.placeTrain(0, cells[1], game.map.edgeFwd[cells[1]])
+  game.placeTrain(1, cells[2], opposite(game.map.edgeFwd[cells[2]]))
+  for i in 0 .. 1:
+    game.trains[i].order = TrainOrder(verb: ovRun)
+  game.trains[0].route = @[cells[2]]
+  game.trains[1].route = @[cells[1]]
+  for _ in 0 ..< game.config.deadlockTicks + 1:
+    game.step()
+  doAssert game.activeDeadlock == @[0, 1], $game.activeDeadlock
+  doAssert game.waitsFor[0] == 1 and game.waitsFor[1] == 0
+  var members: seq[int]
+  var contested: seq[int]
+  for train in game.activeDeadlock:
+    members.add(game.trains[train].cell)
+    contested.add(game.trains[game.waitsFor[train]].cell)
+  members.sort()
+  contested.sort()
+  doAssert members == contested,
+    "in a cycle the cells wanted and the cells held are the same set"
+  var reported = game.deadlockCells
+  reported.sort()
+  doAssert reported == members, $reported & " vs " & $members
+  doAssert reported.len == 2
+  # and the viewer and the observation are handed exactly those cells
+  let seen = game.seatObservation(0, 1, 31){"network_status"}{"deadlock_cells"}
+  doAssert seen.len == 2
+
 # 12. scoring ----------------------------------------------------------------
 check "scoring: the formula, the sign and the lexicographic bound":
   var rng = initRng(7)
