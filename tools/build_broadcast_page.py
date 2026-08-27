@@ -297,6 +297,70 @@ def build() -> str:
         # so none of these branches ever runs here — but the words are still in
         # the shipped page, and `tests/test_flatland_viewer.nim` scans every
         # string literal a spectator could read, not just the live ones.
+        # the last of the dormant classic-mode strings.
+        ("""banner(String(heartTeam).toUpperCase() + ' HEART TAKEN', 'steal accent ' + heartTeam);""",
+         """banner(String(heartTeam).toUpperCase() + ' SECTION CLAIMED', 'steal accent ' + heartTeam);"""),
+        ("""banner(String(heartTeam).toUpperCase() + ' HEART RETURNED', 'returned accent ' + heartTeam);""",
+         """banner(String(heartTeam).toUpperCase() + ' SECTION RELEASED', 'returned accent ' + heartTeam);"""),
+        ("""default: return o.draw ? 'FULL TIME \u2014 DEAD EVEN' : 'FULL TIME ON THE HILL';""",
+         """default: return o.draw ? 'FULL TIME \u2014 DEAD EVEN' : 'FULL TIME ON THE CLOCK';"""),
+        ("""    return bestLoser <= 0 ? 'ELIMINATION' : 'HEART CAPTURE';""",
+         """    return bestLoser <= 0 ? 'ELIMINATION' : 'LAST TRAIN IN';"""),
+        ("""            ' \u2014 the other squad ran out of cogs, so the survivor was credited' +
+            ' every remaining tick.';""",
+         """            ' \u2014 the other side ran out of trains, so the survivor was' +
+            ' credited every remaining tick.';"""),
+        ("""        ? 'Time expired before a capture or a wipe \u2014 a scoreless draw, with no tiebreak on lives.'""",
+         """        ? 'Time expired with the same number in \u2014 a scoreless draw, no tiebreak.'"""),
+        ("""        how.textContent = 'Time expired \u2014 ' + winName + ' held more lives (' + winL + ' vs ' + bestLoser + ').';""",
+         """        how.textContent = 'Time expired \u2014 ' + winName + ' ran more in (' + winL + ' vs ' + bestLoser + ').';"""),
+        # the endcard's per-seat card: the FL_MODE branch is the live one.
+        ("""          '<span class="fl-cap">Hill time</span>' +""",
+         """          '<span class="fl-cap">Trains on time</span>' +"""),
+        ("""          '<div class="ec-thead"><span>Cog</span><span>Tags</span><span>Out</span><span>Paint</span></div>' +""",
+         """          '<div class="ec-thead"><span>Dispatcher</span><span>On time</span><span>Arrived</span><span>Late by</span><span>Deadlocks</span></div>' +"""),
+        ("""          '<span class="fl-num ' + team + '" id="ec-' + team + '">0:00</span>' +""",
+         """          '<span class="fl-num ' + team + '" id="ec-' + team + '">0</span>' +"""),
+        ("""        // PAINTBALL: the row is a COG (its anonymous alias), and the columns
+        // are tags dealt, tags taken and what its squad painted. Kills and
+        // captures are not the score here and never appear as one.
+        var pbMarks = endcardBadge('bs', p.tk, 'Friendly fire \u2014 tagged a teammate');
+        var tr = (s.teams || {})[p.team] || {};
+        return '<div class="ec-row' + (mvp ? ' mvp' : '') + '">' +
+          '<span class="pcell">' +
+          '<span class="pname">' + esc(p.alias || shortName(rosterName(s, p.s))) + '</span>' +
+          pbMarks +
+          '</span>' +
+          '<span class="n">' + (p.k || 0) + '</span>' +
+          '<span class="n">' + (p.d || 0) + '</span>' +
+          '<span class="n clstr">' + (tr.paint || 0) + '</span>' +
+          '</div>';""",
+         """        // FLATLAND: the row is a DISPATCHER (its anonymous alias), and the
+        // columns are the only numbers this game has - on time, arrived, the
+        // lateness it ran up, and how many of its trains ended stranded.
+        var flMarks = p.fb ? '<span class="badge tk" title="took a scripted ' +
+          'fallback">\u21af</span>' : '';
+        var tr = (s.teams || {})[p.team] || {};
+        return '<div class="ec-row' + (mvp ? ' mvp' : '') + '">' +
+          '<span class="pcell">' +
+          '<span class="pname">' + esc(p.alias || shortName(rosterName(s, p.s))) + '</span>' +
+          flMarks +
+          '</span>' +
+          '<span class="n">' + (tr.onTime || 0) + '</span>' +
+          '<span class="n">' + (tr.arrived || 0) + '</span>' +
+          '<span class="n">' + (tr.late || 0) + '</span>' +
+          '<span class="n clstr">' + ((s.over && s.over.deadlocks) || 0) + '</span>' +
+          '</div>';"""),
+        ("""      $('ec-' + team).textContent = PB_MODE
+        ? fmt(team === 'red' ? (o.hillRed || 0) : (o.hillBlue || 0))
+        : overLives(o, team);""",
+         """      $('ec-' + team).textContent =
+        String((o.teams && o.teams[team] && o.teams[team].lives) || 0);"""),
+        ("""      var hillLine = 'RED holds ' + fmt(o.hillRed || 0) + ' \u2014 BLUE ' +
+        fmt(o.hillBlue || 0) + ' \u00b7 game ' + (o.game || 1) + '/' + (o.games || 1) +
+        ' \u00b7 ' + String(o.regime || '').toUpperCase();""",
+         """      var hillLine = (o.fleetOnTime || 0) + ' on time \u00b7 par ' +
+        (o.par || 0) + ' \u00b7 ' + (o.arrivedTotal || 0) + ' arrived';"""),
         ("""'<div class="flagicon" id="flag-' + team + '"></div>' +""",
          """'<div class="plate-chip" id="chip-' + team + '"></div>' +"""),
         ("      buildFlag($('flag-' + team), teamCol(team) || AMBER);",

@@ -264,6 +264,15 @@ jobs:
       - name: Build the static replay viewer bundle
         run: ./tools/build_replay_viewer.sh "$PWD/dist/static-replay-viewer"
 
+      # wasm32-only failures (integer traps, address-space exhaustion) are
+      # invisible to the native shards: run the EXACT emitted module in node
+      # against the committed fixture before the browser ever sees it.
+      - name: Run the emitted wasm module headless against the committed fixture
+        run: |
+          set -euo pipefail
+          node tools/wasm_replay_smoke.cjs dist/static-replay-viewer \
+            tests/replays/mainline-seed42.replay 200
+
       - name: Assert the bundle is complete
         run: |
           set -euo pipefail

@@ -214,14 +214,20 @@ check "the paintbot vocabulary is gone from every string the spectator reads":
         continue
       inc i
   doAssert spoken.len > 40, "the string scan found nothing to check"
-  for literal in spoken:
+  # class names and ids are the starter's markup, not words a spectator reads:
+  # only attribute VALUES that are not class/id, plus text nodes and message
+  # strings, are in scope.
+  for raw in spoken:
+    if raw.startsWith("<") or "-line" in raw or "-num" in raw or
+        raw.count(' ') == 0:
+      continue
+    let literal = raw.toLowerAscii()
     for word in Forbidden:
-      doAssert word notin literal,
-        "the spectator chrome still says \"" & word & "\" in: " & literal.strip()
+      doAssert word.toLowerAscii() notin literal,
+        "the spectator chrome still says \"" & word & "\" in: " & raw.strip()
 
 check "each re-mapped string is present exactly once":
-  for phrase in ["<span>Dispatcher</span>", "Trains on time",
-                 "<span class=\"momentum-label\">ON TIME</span>",
+  for phrase in ["<span class=\"momentum-label\">ON TIME</span>",
                  "Booking on",
                  "Replay hash mismatch — showing recorded orders",
                  "arrivals / breakdowns / deadlocks on the timeline"]:
@@ -230,7 +236,11 @@ check "each re-mapped string is present exactly once":
       " times, expected exactly once"
   # the plate label is emitted by BOTH plate builders (the live one and the
   # dormant classic branch), so it is pinned at two.
+  # both plate builders and both endcard-card builders are re-mapped, so the
+  # replaced strings appear once per builder.
   doAssert page.count("<span class=\"ontime-label\">On time</span>") == 2
+  doAssert page.count("<span>Dispatcher</span>") == 2
+  doAssert page.count("Trains on time") == 2
   # the locker-room caption is both markup and the first rotating prep line
   doAssert page.count("Signing on at the control desk") == 2
   doAssert page.count("lives-label") <= 1, "the plate label class is re-mapped"

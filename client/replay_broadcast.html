@@ -1992,11 +1992,11 @@ body[data-embed] #board { top: 0; height: 100%; }
 
   function onSteal(e, s) {
     var heartTeam = e.flag; // the team whose heart was TAKEN (e.flag is the legacy event field)
-    banner(String(heartTeam).toUpperCase() + ' HEART TAKEN', 'steal accent ' + heartTeam);
+    banner(String(heartTeam).toUpperCase() + ' SECTION CLAIMED', 'steal accent ' + heartTeam);
   }
   function onReturn(e, s) {
     var heartTeam = e.flag;
-    banner(String(heartTeam).toUpperCase() + ' HEART RETURNED', 'returned accent ' + heartTeam);
+    banner(String(heartTeam).toUpperCase() + ' SECTION RELEASED', 'returned accent ' + heartTeam);
   }
   function onCapture(e, s) {
     var byTeam = captureTeam(s, e);
@@ -2090,14 +2090,14 @@ body[data-embed] #board { top: 0; height: 100%; }
         case 'wall_clock': return 'WALL-CLOCK STOP';
         case 'sim_fault':
         case 'host_error': return 'FAULT — NO RESULT';
-        default: return o.draw ? 'FULL TIME — DEAD EVEN' : 'FULL TIME ON THE HILL';
+        default: return o.draw ? 'FULL TIME — DEAD EVEN' : 'FULL TIME ON THE CLOCK';
       }
     }
     if (o.draw) return o.timeLimit ? 'TIME LIMIT — DRAW' : 'DRAW';
     var losers = teams.filter(function (t) { return t !== o.winner; });
     var bestLoser = 0;
     losers.forEach(function (t) { bestLoser = Math.max(bestLoser, overLives(o, t)); });
-    return bestLoser <= 0 ? 'ELIMINATION' : 'HEART CAPTURE';
+    return bestLoser <= 0 ? 'ELIMINATION' : 'LAST TRAIN IN';
   }
 
   function endcardOrder(a, b) {
@@ -2178,19 +2178,21 @@ body[data-embed] #board { top: 0; height: 100%; }
     function rowHtml(p) {
       var mvp = mvpSlot != null && p.s === mvpSlot;
       if (FL_MODE) {
-        // PAINTBALL: the row is a COG (its anonymous alias), and the columns
-        // are tags dealt, tags taken and what its squad painted. Kills and
-        // captures are not the score here and never appear as one.
-        var pbMarks = endcardBadge('bs', p.tk, 'Friendly fire — tagged a teammate');
+        // FLATLAND: the row is a DISPATCHER (its anonymous alias), and the
+        // columns are the only numbers this game has - on time, arrived, the
+        // lateness it ran up, and how many of its trains ended stranded.
+        var flMarks = p.fb ? '<span class="badge tk" title="took a scripted ' +
+          'fallback">↯</span>' : '';
         var tr = (s.teams || {})[p.team] || {};
         return '<div class="ec-row' + (mvp ? ' mvp' : '') + '">' +
           '<span class="pcell">' +
           '<span class="pname">' + esc(p.alias || shortName(rosterName(s, p.s))) + '</span>' +
-          pbMarks +
+          flMarks +
           '</span>' +
-          '<span class="n">' + (p.k || 0) + '</span>' +
-          '<span class="n">' + (p.d || 0) + '</span>' +
-          '<span class="n clstr">' + (tr.paint || 0) + '</span>' +
+          '<span class="n">' + (tr.onTime || 0) + '</span>' +
+          '<span class="n">' + (tr.arrived || 0) + '</span>' +
+          '<span class="n">' + (tr.late || 0) + '</span>' +
+          '<span class="n clstr">' + ((s.over && s.over.deadlocks) || 0) + '</span>' +
           '</div>';
       }
       var marks = endcardBadge('bs', p.tk, 'Blocked one of its own fleet');
@@ -2236,10 +2238,10 @@ body[data-embed] #board { top: 0; height: 100%; }
       el.innerHTML = FL_MODE
         ? '<div class="ec-tname ' + team + '" id="ec-tname-' + team + '">' + team.toUpperCase() + '</div>' +
           '<div class="ec-lives">' +
-          '<span class="fl-num ' + team + '" id="ec-' + team + '">0:00</span>' +
-          '<span class="fl-cap">Hill time</span>' +
+          '<span class="fl-num ' + team + '" id="ec-' + team + '">0</span>' +
+          '<span class="fl-cap">Trains on time</span>' +
           '</div>' +
-          '<div class="ec-thead"><span>Cog</span><span>Tags</span><span>Out</span><span>Paint</span></div>' +
+          '<div class="ec-thead"><span>Dispatcher</span><span>On time</span><span>Arrived</span><span>Late by</span><span>Deadlocks</span></div>' +
           '<div id="ec-rows-' + team + '"></div>'
         : '<div class="ec-tname ' + team + '" id="ec-tname-' + team + '">' + team.toUpperCase() + '</div>' +
           '<div class="ec-lives">' +
@@ -2284,9 +2286,8 @@ body[data-embed] #board { top: 0; height: 100%; }
       if (winners.length) mvpSlot = winners[0].s;
     }
     teams.forEach(function (team) {
-      $('ec-' + team).textContent = FL_MODE
-        ? fmt(team === 'red' ? (o.hillRed || 0) : (o.hillBlue || 0))
-        : overLives(o, team);
+      $('ec-' + team).textContent =
+        String((o.teams && o.teams[team] && o.teams[team].lives) || 0);
       $('ec-tname-' + team).textContent = teamName(s, team, team.toUpperCase());
       $('ec-team-' + team).classList.toggle('win', !o.draw && o.winner === team);
       renderEndcardRows(s, team, $('ec-rows-' + team), mvpSlot);
@@ -2295,9 +2296,8 @@ body[data-embed] #board { top: 0; height: 100%; }
     if (FL_MODE) {
       // PAINTBALL: the verdict names the rule the server applied and always
       // states both banked hill clocks.
-      var hillLine = 'RED holds ' + fmt(o.hillRed || 0) + ' — BLUE ' +
-        fmt(o.hillBlue || 0) + ' · game ' + (o.game || 1) + '/' + (o.games || 1) +
-        ' · ' + String(o.regime || '').toUpperCase();
+      var hillLine = (o.fleetOnTime || 0) + ' on time · par ' +
+        (o.par || 0) + ' · ' + (o.arrivedTotal || 0) + ' arrived';
       if (o.draw) {
         head.className = 'headline draw';
         head.textContent = 'DEAD EVEN';
@@ -2313,8 +2313,8 @@ body[data-embed] #board { top: 0; height: 100%; }
         case 'wipe':
           head.textContent = pbWinName + ' WIPES THE FIELD';
           how.textContent = hillLine +
-            ' — the other squad ran out of cogs, so the survivor was credited' +
-            ' every remaining tick.';
+            ' — the other side ran out of trains, so the survivor was' +
+            ' credited every remaining tick.';
           break;
         case 'mercy':
           how.textContent = hillLine +
@@ -2335,7 +2335,7 @@ body[data-embed] #board { top: 0; height: 100%; }
       head.className = 'headline draw';
       head.textContent = 'DRAW — NO SCORE';
       how.textContent = o.timeLimit
-        ? 'Time expired before a capture or a wipe — a scoreless draw, with no tiebreak on lives.'
+        ? 'Time expired with the same number in — a scoreless draw, no tiebreak.'
         : 'The match ended with neither side scoring — no winner.';
       return;
     }
@@ -2353,7 +2353,7 @@ body[data-embed] #board { top: 0; height: 100%; }
     if (o.timeLimit) {
       // Time-limit resolution — name the key and the values (F3).
       if (winL !== bestLoser) {
-        how.textContent = 'Time expired — ' + winName + ' held more lives (' + winL + ' vs ' + bestLoser + ').';
+        how.textContent = 'Time expired — ' + winName + ' ran more in (' + winL + ' vs ' + bestLoser + ').';
       } else {
         how.textContent = 'Time expired — tied; ' + winName + ' won on arrivals.';
       }
