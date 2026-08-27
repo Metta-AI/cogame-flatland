@@ -61,6 +61,8 @@ check "the top-level shape the 0.1.42 upload contract wants":
     "episode_timeout_minutes is TOP LEVEL, not under game"
   doAssert not doc{"game"}.hasKey("episode_timeout_minutes")
   doAssert not doc.hasKey("version"), "no top-level version"
+  doAssert not doc.hasKey("name") and not doc.hasKey("description"),
+    "top level is additionalProperties:false — name/description live under game"
   doAssert not doc{"game"}.hasKey("display_name")
   doAssert not doc{"game"}.hasKey("tags"), "game.tags is forbidden (pistonball 0.1.0)"
   doAssert doc{"game"}{"description"}.getStr().len > 0
@@ -147,7 +149,9 @@ check "compose declares ONE service whose name derives the image placeholder":
         not line.startsWith("   "):
       inc services
   doAssert services == 1, "exactly one compose service (lantern 0.1.0)"
-  doAssert doc{"game"}{"image"}.getStr() == "{{FLATLAND_IMAGE}}"
+  doAssert doc{"game"}{"runnable"}{"image"}.getStr() == "{{FLATLAND_IMAGE}}",
+    "the image placeholder lives on game.runnable, not on game " &
+    "(coworld 0.1.43 bundle.py `_load_template_manifest`)"
   for entry in doc{"player"}:
     doAssert entry{"image"}.getStr() == "{{FLATLAND_IMAGE}}"
 
