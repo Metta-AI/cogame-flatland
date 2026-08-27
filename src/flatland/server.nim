@@ -200,6 +200,15 @@ proc httpHandler(request: Request) {.gcsafe.} =
 
 proc websocketHandler(websocket: WebSocket, event: WebSocketEvent,
                       message: Message) {.gcsafe.} =
+  if event == MessageEvent and message.kind == Ping:
+    ## Mummy does not answer Ping frames itself — it hands them to this
+    ## handler as a MessageEvent — and certification pings `/global` and
+    ## requires the Pong inside two seconds (coworld 0.1.43
+    ## `runner.py:_require_websocket_pong`). Answered BEFORE the lock, which
+    ## the episode thread holds while it assembles a frame, and before the
+    ## payload can reach the registration or viewer parsers.
+    websocket.send(message.data, Pong)
+    return
   {.gcsafe.}:
     withLock appState.lock:
       case event
