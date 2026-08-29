@@ -265,7 +265,7 @@ proc broadcastFrame(engine: var Engine, events: JsonNode,
                     includeTimeline: bool) =
   ## Fire-and-forget: a slow viewer can never stall the episode.
   let chrome = buildStateJson(engine.game, events,
-    playing = engine.game.phase == Playing, speed = 1,
+    playing = engine.game.phase == Playing, speed = 1.0,
     maxTick = engine.game.config.maxTicks, startTick = 0,
     looping = false, transportEnabled = false, skipLulls = false,
     fastForwarding = false, mismatchTick = -1, prescan = engine.prescan,

@@ -16,6 +16,9 @@ import sim, replay_runtime, sim_types
 const
   ChromeTeams*: array[4, string] = ["red", "blue", "green", "yellow"]
   PlaybackSpeeds*: array[6, int] = [1, 2, 3, 4, 8, 16]
+  ReplayHalfSpeedIndex* = -1
+    ## speedIndex sentinel for 1/2x playback: one sim tick every other frame.
+    ## Replay-only — the live broadcast always reports 1x.
 
   DerivedEventKinds*: array[13, string] = [
     "turn", "order", "say", "fallback", "depart", "arrive", "malfunction",
@@ -27,6 +30,39 @@ const
 
 proc chromeTeam*(slot: int): string =
   if slot >= 0 and slot < ChromeTeams.len: ChromeTeams[slot] else: "red"
+
+proc replaySpeed*(speedIndex: int): int =
+  ## The integer replay speed (1 while at 1/2x — the fractional pace lives in
+  ## replayStepBudget's frame parity).
+  PlaybackSpeeds[clamp(speedIndex, 0, PlaybackSpeeds.high)]
+
+proc replayDisplaySpeed*(speedIndex: int): float =
+  ## The speed the chrome shows: 0.5 at half speed, else the integer speed.
+  if speedIndex == ReplayHalfSpeedIndex: 0.5
+  else: float(replaySpeed(speedIndex))
+
+proc replayStepBudget*(speedIndex: int, halfPhase: bool): int =
+  ## How many ticks playback may advance this frame at the chosen speed. At
+  ## 1/2x a tick is spent only every OTHER frame (halfPhase parity); the
+  ## skip-lulls boost at the caller works from the integer speed instead.
+  if speedIndex == ReplayHalfSpeedIndex:
+    return (if halfPhase: 1 else: 0)
+  replaySpeed(speedIndex)
+
+proc applySpeedCommand*(speedIndex: var int, command: string) =
+  ## Applies one playback speed command. "5" selects the 1/2x replay speed
+  ## (ReplayHalfSpeedIndex), and "-" floors there.
+  case command
+  of "+", "=": speedIndex = min(speedIndex + 1, PlaybackSpeeds.high)
+  of "-", "_": speedIndex = max(speedIndex - 1, ReplayHalfSpeedIndex)
+  of "5": speedIndex = ReplayHalfSpeedIndex
+  of "1": speedIndex = 0
+  of "2": speedIndex = 1
+  of "3": speedIndex = 2
+  of "4": speedIndex = 3
+  of "8": speedIndex = 4
+  of "6": speedIndex = 5
+  else: discard
 
 proc stepEvents*(game: SimServer): JsonNode =
   ## Derives the broadcast events from this tick's state deltas, so they cost
@@ -199,7 +235,8 @@ proc leadJson*(game: SimServer, prescan: Prescan): JsonNode =
   %*{"teams": teams, "pts": pts}
 
 proc buildStateJson*(game: SimServer, events: JsonNode, playing: bool,
-                     speed, maxTick, startTick: int, looping, transportEnabled,
+                     speed: float, maxTick, startTick: int,
+                     looping, transportEnabled,
                      skipLulls, fastForwarding: bool, mismatchTick: int,
                      prescan: Prescan, includeTimeline: bool): string =
   ## The broadcast chrome frame. Board-derived STATE is always present, so a

@@ -1,4 +1,4 @@
 {
-  "chrome_common.js": "7ace7287e0d19bf0fddb2362c55e4d76dfb44adcd4fbc8d1743b0557ced72f7c",
-  "_note": "chrome_common.js is copied byte-for-byte from Metta-AI/coworld-ctf @ e356bdd; this pin is the starter's file."
+  "chrome_common.js": "594ed4a72cd908922c982d0f3e3ffb04ae1d97568fcd5f5daa794042662a369c",
+  "_note": "chrome_common.js is copied byte-for-byte from Metta-AI/coworld-ctf @ e356bdd plus the fleet-wide replay transport patch (0.5x speed chip in the SPEEDS fallback and the speed->command map); everything else stays the starter's bytes."
 }

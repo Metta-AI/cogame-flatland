@@ -9,7 +9,9 @@ import std/strutils
 import sim_types, upstream, sim_config, railmap, global, rig_art, broadcast
 
 proc wireConstantsJs*(): string =
-  var speeds: seq[string]
+  # 0.5 is the replay-only half speed (ReplayHalfSpeedIndex, command '5');
+  # it rides ahead of the engine's integer PlaybackSpeeds.
+  var speeds: seq[string] = @["0.5"]
   for speed in PlaybackSpeeds:
     speeds.add($speed)
   var beats: seq[string]
