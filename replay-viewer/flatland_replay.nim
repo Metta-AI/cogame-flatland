@@ -30,6 +30,9 @@ var
   looping = false
   skipLulls = false
   speedIndex = 0
+  halfPhase = false
+    ## Frame parity while at 1/2x speed (ReplayHalfSpeedIndex): ticks advance
+    ## only on the odd frames, toggled once per flatlandFrame call.
   frameAccumulator = 0
   timelineSent = false
 
@@ -71,7 +74,7 @@ proc placements(): seq[TrainPlacement] =
 
 proc renderCurrent(events: JsonNode) =
   let chrome = buildStateJson(runtime.sim, events,
-    playing = playing, speed = PlaybackSpeeds[speedIndex],
+    playing = playing, speed = replayDisplaySpeed(speedIndex),
     maxTick = max(1, runtime.player.prescan.ticks), startTick = 0,
     looping = looping, transportEnabled = true, skipLulls = skipLulls,
     fastForwarding = false, mismatchTick = runtime.player.hashMismatchTick,
@@ -121,14 +124,8 @@ proc applyCommand(text: string) =
   of "e": runtime.seekTo(max(1, runtime.player.prescan.ticks))
   of "r": looping = not looping
   of "f": skipLulls = not skipLulls
-  of "+", "=": speedIndex = min(PlaybackSpeeds.len - 1, speedIndex + 1)
-  of "-", "_": speedIndex = max(0, speedIndex - 1)
-  of "1": speedIndex = 0
-  of "2": speedIndex = 1
-  of "3": speedIndex = 2
-  of "4": speedIndex = 3
-  of "8": speedIndex = 4
-  of "6": speedIndex = 5
+  of "+", "=", "-", "_", "1", "2", "3", "4", "5", "8", "6":
+    applySpeedCommand(speedIndex, text)
   else: discard
 
 proc flatlandInput(data: ptr uint8, length: cint)
@@ -152,15 +149,17 @@ proc inLull(tick: int): bool =
 proc flatlandFrame(): cint {.exportc: "flatland_frame", cdecl.} =
   if not runtimeLoaded:
     return 0
+  halfPhase = not halfPhase
   stampStage(frameStage)
   try:
     var events = newJArray()
     if playing:
       ## Playback rate is 1 tick per animation frame at the base speed; the
-      ## speed chips multiply it. Skip-lulls fast-forwards quiet stretches.
-      var steps = PlaybackSpeeds[speedIndex]
+      ## speed chips multiply it, and 1/2x spends a tick only every other
+      ## frame. Skip-lulls fast-forwards quiet stretches at the integer speed.
+      var steps = replayStepBudget(speedIndex, halfPhase)
       if skipLulls and inLull(runtime.sim.tick):
-        steps = steps * 8
+        steps = replaySpeed(speedIndex) * 8
       for _ in 0 ..< steps:
         if runtime.sim.phase != Playing:
           if looping:

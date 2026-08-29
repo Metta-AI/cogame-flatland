@@ -21,12 +21,13 @@ let core = readRepoFile("client/broadcast_core.js")
 let common = readRepoFile("client/chrome_common.js")
 let gameBlock = readRepoFile("client/flatland_block.html")
 
-# 35. chrome_common.js is byte-identical to the starter's --------------------
-check "client/chrome_common.js is byte-identical to the starter's":
+# 35. chrome_common.js is the starter's plus the replay transport patch -----
+check "client/chrome_common.js is the pinned starter bytes + transport patch":
   let pins = parseJson(readRepoFile("tests/chrome_sha256.json"))
   doAssert toHex(sha256(common)) == pins{"chrome_common.js"}.getStr(),
-    "chrome_common.js is copied BYTE-FOR-BYTE from coworld-ctf; everything " &
-    "this game adds lives in the appended block"
+    "chrome_common.js is the starter's bytes plus ONLY the fleet-wide " &
+    "replay transport patch (0.5x speed chip); everything else this game " &
+    "adds lives in the appended block"
   doAssert "window.ChromeCommon" in common
   for name in ["markBeat", "renderBeatMarkers", "ingestBeats", "renderClock",
                "renderTransport", "ingestLullSpans", "renderMomentum"]:
@@ -310,6 +311,9 @@ check "the wire constants are one source and alias the byte-identical chrome":
   doAssert "window.CTF_WIRE=window.FLATLAND_WIRE;" in js,
     "chrome_common.js is byte-identical and reads window.CTF_WIRE"
   let node = parseJson(js.split("=", 1)[1].split("};")[0] & "}")
+  doAssert node{"speeds"}[0].getFloat() == 0.5,
+    "the replay-only 1/2x speed rides ahead of the integer PlaybackSpeeds"
+  doAssert node{"speeds"}.len == PlaybackSpeeds.len + 1
   doAssert node{"chromeSpriteId"}.getInt() == BroadcastChromeSpriteId
   doAssert node{"gridW"}.getInt() == GridWidth
   doAssert node{"maxTicks"}.getInt() == 496

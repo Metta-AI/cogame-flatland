@@ -3,8 +3,8 @@
 
 import std/[json, os, osproc, strutils, unicode]
 
-import flatland/[sim, baselines, directives, replays, replay_runtime, roster,
-                 decide]
+import flatland/[sim, baselines, broadcast, directives, replays,
+                 replay_runtime, roster, decide]
 import ./helpers
 
 echo "test_flatland_replay"
@@ -327,5 +327,28 @@ check "every committed replay fixture carries the current GameVersion":
         path & " was recorded under GameVersion " & replay.gameVersion &
         "; re-record it in the same commit as the bump"
     doAssert seen > 0, "tests/replays/ exists but holds no fixture"
+
+# 33. the 1/2x replay speed --------------------------------------------------
+check "the 1/2x speed is a replay-only crawl selected by command \"5\"":
+  ## The fleet-wide 1/2x replay speed: "5" selects ReplayHalfSpeedIndex, the
+  ## chrome shows 0.5, and the step budget spends one tick every OTHER frame
+  ## (halfPhase parity) outside lulls.
+  var speedIndex = 0
+  applySpeedCommand(speedIndex, "5")
+  doAssert speedIndex == ReplayHalfSpeedIndex, "\"5\" must select 1/2x"
+  doAssert replayDisplaySpeed(speedIndex) == 0.5,
+    "the chrome speed at 1/2x is 0.5, got " & $replayDisplaySpeed(speedIndex)
+  doAssert replaySpeed(speedIndex) == 1,
+    "the integer speed clamps to 1x at 1/2x (skip-lulls boost safety)"
+  doAssert replayStepBudget(speedIndex, halfPhase = false) == 0,
+    "even frame at 1/2x spends no tick"
+  doAssert replayStepBudget(speedIndex, halfPhase = true) == 1,
+    "odd frame at 1/2x spends one tick"
+  applySpeedCommand(speedIndex, "+")
+  doAssert speedIndex == 0, "\"+\" from 1/2x lands on 1x"
+  applySpeedCommand(speedIndex, "-")
+  doAssert speedIndex == ReplayHalfSpeedIndex, "\"-\" from 1x lands on 1/2x"
+  applySpeedCommand(speedIndex, "-")
+  doAssert speedIndex == ReplayHalfSpeedIndex, "1/2x is the floor"
 
 echo "test_flatland_replay: ", checks, " checks ok"
