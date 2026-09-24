@@ -33,6 +33,8 @@ cannot see each other's timetables, and the only channel between them is a
 
 ## Docs
 
+* [`docs/TRAINING.md`](docs/TRAINING.md) — native match exports and numeric training.
+
 * [`docs/RULES.md`](docs/RULES.md) — the rules, the tick order and the scoring.
 * [`docs/DISPATCHING.md`](docs/DISPATCHING.md) — the network, the orders, and how to
   write a dispatcher prompt.
