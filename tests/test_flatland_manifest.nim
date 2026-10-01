@@ -96,9 +96,8 @@ check "every declared player's cpu limit is at least 1":
 check "the secret namespace is game.name and the game pod receives the key":
   let name = doc{"game"}{"name"}.getStr()
   doAssert name == GameName
-  doAssert doc{"game"}{"runnable"}{"env"}{"ANTHROPIC_API_KEY_URI"}.getStr() ==
-    "secret://coworld/" & name & "/anthropic_api_key",
-    "the secret namespace must equal game.name (cooperative-hunting 2026-08-25)"
+  doAssert doc{"game"}{"runnable"}{"env"}{"ANTHROPIC_API_KEY_URI"}.isNil,
+    "hosted LLM uses the platform sidecar without provider secrets"
 
 check "every wallClockBudgetSeconds is inside 60% of the episode timeout":
   let cap = doc{"episode_timeout_minutes"}.getInt() * 60
@@ -201,7 +200,7 @@ check "the workflow scaffold is present, substituted and executable":
   doAssert "--timeout-seconds 300" in release
   doAssert "release-result" in release
   doAssert "\"player\"" in release or "player_id" in release
-  for name in ["version", "policies", "put_secret", "skip_certify"]:
+  for name in ["version", "policies", "skip_certify"]:
     doAssert "      " & name & ":" in release, "release input " & name & " is missing"
   let submit = readRepoFile(".github/workflows/coworld-submit.yml")
   doAssert "submit-result" in submit
