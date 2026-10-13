@@ -67,8 +67,8 @@ this is a simultaneous-decision game, and serial calls would quadruple the wall 
 ```
 attempt1Ms                          9.0 s
 retryMs                             4.0 s
-turnBudgetMs                       14.0 s   (monotonic deadline around the whole turn)
-turnSpacingMs                      12.0 s   -> 4 seats x 60/12 = 20 req/min (cap 30)
+turnBudgetMs                       14.0 s   (monotonic request deadline after spacing)
+turnSpacingMs                      12.0 s   -> at most 10 req/min per seat including retries (cap 30)
 
 31 turns x max(spacing 12 s, budget 14 s), absolute worst          = 434 s
    typical (haiku answers in ~3-5 s, so spacing dominates)         = 372 s
@@ -85,8 +85,9 @@ platform kill (episodeTimeoutSeconds)                              = 1200 s
 720 s is 60 % of the assumed 1200 s `episodeTimeoutSeconds`; every shipped variant's
 `wallClockBudgetSeconds` is <= 660 and `tests/test_flatland_manifest.nim` asserts it.
 
-A **rate guard** keeps a rolling 60 s request counter: if issuing the next batch would
-push the trailing count above 28, the seats that would exceed it skip the call and take
+A **rate guard** keeps a separate rolling 60 s request counter for each seat.
+Before either attempt, seats whose next request would push their count above 28
+skip the call and take
 the `yielder` orders with `cause = "rate_guard"`. Bounded, logged, never a sleep on the
 critical path.
 
