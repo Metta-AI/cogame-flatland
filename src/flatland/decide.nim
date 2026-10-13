@@ -37,21 +37,19 @@ type
     lastBatchStart*: MonoTime
     batchStarted*: bool
     llmOff*: bool                ## the budget guard fired; scripted from here on
-    requestTimes*: seq[MonoTime] ## the rolling 60 s window, for the rate guard
+    requestTimes*: seq[seq[MonoTime]] ## the rolling 60 s window, for the rate guard
     records*: seq[string]        ## chat records queued for the replay writer
     params*: BaselineParams
 
 const
   RateWindowSeconds* = 60
   RateWindowCap* = 28
-    ## `turnSpacingMs` pins the steady state at 20 req/min, but a turn in which
-    ## every seat retries issues 8. The rolling counter keeps the episode under
-    ## the sidecar's 30 req/min per-episode cap without ever sleeping on the
-    ## critical path (the raid round 2 sidecar-throttle scar).
+    ## Leave headroom below the native sidecar's 30 requests/minute per slot.
 
 proc initDecisionEngine*(game: SimServer): DecisionEngine =
   result.client = newLlmClient(game.config)
   result.seats = newSeq[SeatPolicy](game.seatCount())
+  result.requestTimes = newSeq[seq[MonoTime]](game.seatCount())
   result.params = DefaultBaselineParams
   for i in 0 ..< result.seats.len:
     result.seats[i].baseline = blYielder
@@ -134,16 +132,13 @@ proc resultRecord*(resultsJson: string): string =
 #  The rate guard
 # ---------------------------------------------------------------------------
 
-proc pruneRateWindow(engine: var DecisionEngine, now: MonoTime) =
+proc rateBudget(engine: var DecisionEngine, seat: int, now: MonoTime): int =
   var kept: seq[MonoTime]
-  for stamp in engine.requestTimes:
+  for stamp in engine.requestTimes[seat]:
     if (now - stamp).inSeconds < RateWindowSeconds:
       kept.add(stamp)
-  engine.requestTimes = kept
-
-proc rateBudget(engine: var DecisionEngine, now: MonoTime): int =
-  engine.pruneRateWindow(now)
-  max(0, RateWindowCap - engine.requestTimes.len)
+  engine.requestTimes[seat] = kept
+  max(0, RateWindowCap - kept.len)
 
 # ---------------------------------------------------------------------------
 #  The turn
@@ -159,7 +154,6 @@ proc turn*(engine: var DecisionEngine, game: SimServer, turnIndex: int,
   let
     turns = game.config.turnsPerEpisode()
     budget = initDuration(milliseconds = max(1, game.config.turnBudgetMs))
-    turnStart = getMonoTime()
   engine.client.throttled = false
   result.directives = newSeq[Directive](game.seatCount())
   result.views = newSeq[JsonNode](game.seatCount())
@@ -177,10 +171,12 @@ proc turn*(engine: var DecisionEngine, game: SimServer, turnIndex: int,
         "; remaining turns play scripted"
 
   # --- which seats need a call? --------------------------------------------
-  var open: seq[int]
+  var open, rateBlocked: seq[int]
+  var failureCauses = newSeq[string](game.seatCount())
   for seat in 0 ..< game.seatCount():
     if engine.seats[seat].isLlm and not engine.llmOff and
         not engine.client.disabled:
+      failureCauses[seat] = "no_credentials"
       open.add(seat)
     elif engine.seats[seat].isLlm:
       ## An LLM seat that CANNOT call the LLM this turn is a FALLBACK, not a
@@ -211,24 +207,6 @@ proc turn*(engine: var DecisionEngine, game: SimServer, turnIndex: int,
       directive.source = dsScripted
       result.directives[seat] = directive
 
-  # --- the rate guard -------------------------------------------------------
-  if open.len > 0:
-    let allowed = engine.rateBudget(getMonoTime())
-    if open.len > allowed:
-      var kept: seq[int]
-      for i, seat in open:
-        if i < allowed:
-          kept.add(seat)
-          continue
-        var directive = engine.yielderFor(game, seat)
-        directive.source = dsFallback
-        result.directives[seat] = directive
-        result.records.add(fallbackRecord(turnIndex, seat, 1, "rate_guard",
-          "the trailing 60 s request window is full"))
-        echo "flatland llm: seat ", seat, " falling back to yielder ",
-          "(rate_guard) on turn ", turnIndex
-      open = kept
-
   # --- the rate floor -------------------------------------------------------
   if open.len > 0 and engine.batchStarted and game.config.turnSpacingMs > 0:
     let since = (getMonoTime() - engine.lastBatchStart).inMilliseconds.int
@@ -243,14 +221,26 @@ proc turn*(engine: var DecisionEngine, game: SimServer, turnIndex: int,
   # "visible: the whole network, once, at registration". A provider call has no
   # memory of the last one, so "once" has to mean "identical every turn".
   let briefing = if open.len > 0: $game.networkBriefing() else: ""
+  let turnStart = getMonoTime()
   var attempt = 0
   while open.len > 0 and attempt < 2:
     if engine.client.disabled:
       break
     if getMonoTime() - turnStart >= budget:
       for seat in open:
+        failureCauses[seat] = "timeout"
         result.records.add(fallbackRecord(turnIndex, seat, attempt + 1,
           "timeout", "per-turn budget exhausted before attempt " & $(attempt + 1)))
+      break
+    var eligible: seq[int]
+    for seat in open:
+      if engine.rateBudget(seat, getMonoTime()) > 0:
+        eligible.add(seat)
+      else:
+        failureCauses[seat] = "rate_guard"
+        rateBlocked.add(seat)
+    open = eligible
+    if open.len == 0:
       break
     let deadlineMs =
       if attempt == 0: game.config.attempt1Ms else: game.config.retryMs
@@ -263,7 +253,7 @@ proc turn*(engine: var DecisionEngine, game: SimServer, turnIndex: int,
       let request = engine.client.requestFor(
         SystemPrompt, userMessage(briefing, engine.seats[seat].prompt, user), seat)
       batch.post(request.url, request.headers, request.body, $seat)
-      engine.requestTimes.add(getMonoTime())
+      engine.requestTimes[seat].add(getMonoTime())
     let started = getMonoTime()
     # curly hands the deadline to CURLOPT_TIMEOUT, whose granularity is WHOLE
     # SECONDS, so this conversion FLOORS — sim_config rejects a sub-second
@@ -286,8 +276,11 @@ proc turn*(engine: var DecisionEngine, game: SimServer, turnIndex: int,
         if responses[position].error.len > 0:
           cause = (if "timeout" in responses[position].error.toLowerAscii():
                      "timeout" else: "transport_error")
+        elif responses[position].response.code in [401, 403]:
+          cause = "no_credentials"
         elif error.msg.startsWith("llm throttled"):
-          cause = "timeout"
+          cause = "throttled"
+        failureCauses[seat] = cause
         result.records.add(fallbackRecord(turnIndex, seat, attempt + 1, cause,
                                           error.msg))
         echo "flatland llm: seat ", seat, " attempt ", attempt + 1,
@@ -304,15 +297,11 @@ proc turn*(engine: var DecisionEngine, game: SimServer, turnIndex: int,
       break
 
   # --- anything still open plays yielder for this turn ---------------------
-  for seat in open:
+  for seat in open & rateBlocked:
     var directive = engine.yielderFor(game, seat)
     directive.source = dsFallback
     result.directives[seat] = directive
-    let cause =
-      if engine.client.disabled or engine.client.transport == ltNone:
-        "no_credentials"
-      elif engine.llmOff: "budget_guard"
-      else: "parse_error"
+    let cause = failureCauses[seat]
     result.records.add(fallbackRecord(turnIndex, seat, 2, cause,
       "seat fell back to the yielder orders"))
     ## "falling back" is the phrase phase 60 greps the GAME log for.

@@ -141,7 +141,7 @@ check "compose declares ONE service whose name derives the image placeholder":
   doAssert "  flatland:" in compose
   doAssert "image: coworld-flatland:latest" in compose
   doAssert "platform: linux/amd64" in compose
-  doAssert "network: host" in compose
+  doAssert "network: host" notin compose
   var services = 0
   for line in compose.splitLines():
     if line.startsWith("  ") and line.strip().endsWith(":") and
